@@ -1,5 +1,5 @@
 {
-  "installCommand": "pnpm install --frozen-lockfile",
+  "installCommand": "pnpm install --no-frozen-lockfile",
   "buildCommand": "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/steamshare run build",
   "outputDirectory": "artifacts/steamshare/dist/public",
   "functions": {
