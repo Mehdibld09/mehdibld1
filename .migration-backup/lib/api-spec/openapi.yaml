@@ -1,0 +1,1382 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: SteamShare API - Steam account marketplace with points, XP, and badges
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: accounts
+    description: Steam account listings
+  - name: comments
+    description: Comments on accounts
+  - name: users
+    description: User profiles and leaderboard
+  - name: adlinks
+    description: Ad links for earning points
+  - name: admin
+    description: Admin operations
+  - name: stats
+    description: Global statistics
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # Auth
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Username or email already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Log in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Log out
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # Accounts
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [accounts]
+      summary: List steam accounts (recent or filtered by game)
+      parameters:
+        - name: game
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [recent, popular, free, points]
+            default: recent
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountListResponse"
+
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Post a steam account listing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /accounts/games:
+    get:
+      operationId: listGames
+      tags: [accounts]
+      summary: List all unique games available in listings
+      responses:
+        "200":
+          description: List of games with counts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GameCount"
+
+  /accounts/{accountId}:
+    get:
+      operationId: getAccount
+      tags: [accounts]
+      summary: Get a single steam account listing
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      summary: Delete a steam account listing (owner or admin)
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /accounts/{accountId}/claim:
+    post:
+      operationId: claimAccount
+      tags: [accounts]
+      summary: Claim/buy a steam account using points
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Claimed successfully — returns steam credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimResult"
+        "400":
+          description: Not enough points or already claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /accounts/{accountId}/like:
+    post:
+      operationId: likeAccount
+      tags: [accounts]
+      summary: Like a steam account listing
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Liked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+    delete:
+      operationId: unlikeAccount
+      tags: [accounts]
+      summary: Remove like from a steam account listing
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Like removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  # Comments
+  /accounts/{accountId}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      summary: List comments on an account listing
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+
+    post:
+      operationId: createComment
+      tags: [comments]
+      summary: Post a comment on an account listing
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentInput"
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /accounts/{accountId}/comments/{commentId}:
+    delete:
+      operationId: deleteComment
+      tags: [comments]
+      summary: Delete a comment (owner or admin)
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  /accounts/{accountId}/comments/{commentId}/like:
+    post:
+      operationId: likeComment
+      tags: [comments]
+      summary: Like a comment
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Liked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+    delete:
+      operationId: unlikeComment
+      tags: [comments]
+      summary: Unlike a comment
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Unliked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  # Users
+  /users/leaderboard:
+    get:
+      operationId: getLeaderboard
+      tags: [users]
+      summary: Top users by XP level
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserPublic"
+
+  /users/{userId}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get a user's public profile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /users/{userId}/accounts:
+    get:
+      operationId: getUserAccounts
+      tags: [users]
+      summary: Get all accounts posted by a user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+
+  # Ad Links
+  /ad-links:
+    get:
+      operationId: listAdLinks
+      tags: [adlinks]
+      summary: List all ad links (admin only)
+      responses:
+        "200":
+          description: Ad links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdLink"
+
+    post:
+      operationId: createAdLink
+      tags: [adlinks]
+      summary: Create an ad link (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdLinkInput"
+      responses:
+        "201":
+          description: Ad link created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdLink"
+
+  /ad-links/{code}/redeem:
+    get:
+      operationId: redeemAdLink
+      tags: [adlinks]
+      summary: Redeem an ad link to earn points
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Points earned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedeemResult"
+        "400":
+          description: Already redeemed or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Link not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /ad-links/{adLinkId}:
+    delete:
+      operationId: deleteAdLink
+      tags: [adlinks]
+      summary: Delete an ad link (admin only)
+      parameters:
+        - name: adLinkId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  # Admin
+  /admin/users/{userId}/ban:
+    post:
+      operationId: banUser
+      tags: [admin]
+      summary: Ban a user (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User banned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+    delete:
+      operationId: unbanUser
+      tags: [admin]
+      summary: Unban a user (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User unbanned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  /admin/users:
+    get:
+      operationId: listUsers
+      tags: [admin]
+      summary: List all users (admin only)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserPublic"
+
+  # Password Reset
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request a password reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordInput"
+      responses:
+        "200":
+          description: Token generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgotPasswordResult"
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Reset password using a token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordInput"
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+        "400":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # Steam credential verification
+  /accounts/verify-credentials:
+    post:
+      operationId: verifyCredentials
+      tags: [accounts]
+      summary: Check if Steam credentials are valid before posting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyCredentialsInput"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyCredentialsResult"
+
+  # Giveaways
+  /giveaways:
+    get:
+      operationId: listGiveaways
+      tags: [stats]
+      summary: List all giveaways
+      responses:
+        "200":
+          description: Giveaways
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Giveaway"
+
+    post:
+      operationId: createGiveaway
+      tags: [stats]
+      summary: Create a giveaway (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GiveawayInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Giveaway"
+
+  /giveaways/{giveawayId}:
+    get:
+      operationId: getGiveaway
+      tags: [stats]
+      summary: Get a giveaway
+      parameters:
+        - name: giveawayId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Giveaway
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Giveaway"
+
+    delete:
+      operationId: deleteGiveaway
+      tags: [stats]
+      summary: Delete a giveaway (admin only)
+      parameters:
+        - name: giveawayId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+
+  /giveaways/{giveawayId}/enter:
+    post:
+      operationId: enterGiveaway
+      tags: [stats]
+      summary: Enter a giveaway
+      parameters:
+        - name: giveawayId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnterGiveawayInput"
+      responses:
+        "200":
+          description: Entered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessMessage"
+        "400":
+          description: Already entered or closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /giveaways/{giveawayId}/entries:
+    get:
+      operationId: getGiveawayEntries
+      tags: [stats]
+      summary: List giveaway entries (admin only)
+      parameters:
+        - name: giveawayId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GiveawayEntry"
+
+  /giveaways/{giveawayId}/draw:
+    post:
+      operationId: drawGiveaway
+      tags: [stats]
+      summary: Draw a winner (admin only)
+      parameters:
+        - name: giveawayId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Winner drawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DrawResult"
+
+  # Stats
+  /stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Global site statistics
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteStats"
+
+  /badges:
+    get:
+      operationId: listBadges
+      tags: [stats]
+      summary: List all available badges
+      responses:
+        "200":
+          description: Badges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Badge"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    SuccessMessage:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    RegisterInput:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+
+    LoginInput:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    User:
+      type: object
+      required: [id, username, email, points, xp, level, isAdmin, isBanned, createdAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        points:
+          type: integer
+        xp:
+          type: integer
+        level:
+          type: integer
+        badgeName:
+          type: ["string", "null"]
+        isAdmin:
+          type: boolean
+        isBanned:
+          type: boolean
+        banReason:
+          type: ["string", "null"]
+        banExpiresAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    UserPublic:
+      type: object
+      required: [id, username, xp, level, points, createdAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        points:
+          type: integer
+        xp:
+          type: integer
+        level:
+          type: integer
+        badgeName:
+          type: ["string", "null"]
+        isBanned:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    UserProfile:
+      type: object
+      required: [id, username, xp, level, points, totalAccounts, totalLikesReceived, createdAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        points:
+          type: integer
+        xp:
+          type: integer
+        level:
+          type: integer
+        badgeName:
+          type: ["string", "null"]
+        totalAccounts:
+          type: integer
+        totalLikesReceived:
+          type: integer
+        isBanned:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Account:
+      type: object
+      required: [id, userId, username, title, description, games, pointsCost, isAvailable, likesCount, claimsCount, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        username:
+          type: string
+        posterUsername:
+          type: string
+        posterAvatarUrl:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: string
+        games:
+          type: array
+          items:
+            type: string
+        pointsCost:
+          type: integer
+        isAvailable:
+          type: boolean
+        likesCount:
+          type: integer
+        claimsCount:
+          type: integer
+        viewCount:
+          type: integer
+        workingVotes:
+          type: integer
+        notWorkingVotes:
+          type: integer
+        unlockMethod:
+          type: string
+          enum: [login, like, comment]
+        userHasLiked:
+          type: boolean
+        userHasCommented:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    AccountListResponse:
+      type: object
+      required: [accounts, total, page, limit]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    AccountInput:
+      type: object
+      required: [title, description, games, pointsCost, steamUsername, steamPassword]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        games:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        pointsCost:
+          type: integer
+          minimum: 0
+        steamUsername:
+          type: string
+        steamPassword:
+          type: string
+        unlockMethod:
+          type: string
+          enum: [login, like, comment]
+
+    ClaimResult:
+      type: object
+      required: [steamUsername, steamPassword, pointsSpent]
+      properties:
+        steamUsername:
+          type: string
+        steamPassword:
+          type: string
+        pointsSpent:
+          type: integer
+
+    Comment:
+      type: object
+      required: [id, accountId, userId, username, content, likesCount, createdAt]
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        userId:
+          type: integer
+        username:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        content:
+          type: string
+        likesCount:
+          type: integer
+        userHasLiked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CommentInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    GameCount:
+      type: object
+      required: [game, count]
+      properties:
+        game:
+          type: string
+        count:
+          type: integer
+
+    AdLink:
+      type: object
+      required: [id, code, pointsReward, maxUses, usesCount, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        description:
+          type: ["string", "null"]
+        pointsReward:
+          type: integer
+        maxUses:
+          type: integer
+        usesCount:
+          type: integer
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    AdLinkInput:
+      type: object
+      required: [pointsReward, maxUses]
+      properties:
+        description:
+          type: string
+        pointsReward:
+          type: integer
+          minimum: 1
+        maxUses:
+          type: integer
+          minimum: 1
+
+    RedeemResult:
+      type: object
+      required: [pointsEarned, newTotal]
+      properties:
+        pointsEarned:
+          type: integer
+        newTotal:
+          type: integer
+        xpEarned:
+          type: integer
+
+    Badge:
+      type: object
+      required: [id, name, description, xpThreshold]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        xpThreshold:
+          type: integer
+        iconUrl:
+          type: ["string", "null"]
+
+    SiteStats:
+      type: object
+      required: [totalUsers, totalAccounts, totalClaims, totalPointsCirculating, topGames]
+      properties:
+        totalUsers:
+          type: integer
+        totalAccounts:
+          type: integer
+        totalClaims:
+          type: integer
+        totalPointsCirculating:
+          type: integer
+        topGames:
+          type: array
+          items:
+            $ref: "#/components/schemas/GameCount"
+
+    ForgotPasswordInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    ForgotPasswordResult:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        resetToken:
+          type: string
+        expiresAt:
+          type: string
+
+    ResetPasswordInput:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 6
+
+    VerifyCredentialsInput:
+      type: object
+      required: [steamUsername, steamPassword]
+      properties:
+        steamUsername:
+          type: string
+        steamPassword:
+          type: string
+
+    VerifyCredentialsResult:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [valid, invalid, rate_limited, error]
+        message:
+          type: string
+        games:
+          type: array
+          items:
+            type: string
+        steamid:
+          type: string
+        isFamilyShare:
+          type: boolean
+
+    Giveaway:
+      type: object
+      required: [id, createdBy, title, description, prize, taskDescription, maxEntries, entriesCount, endDate, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        createdBy:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        prize:
+          type: string
+        taskDescription:
+          type: string
+        maxEntries:
+          type: integer
+        entriesCount:
+          type: integer
+        endDate:
+          type: string
+          format: date-time
+        isActive:
+          type: boolean
+        winnerUserId:
+          type: ["integer", "null"]
+        winnerUsername:
+          type: ["string", "null"]
+        userHasEntered:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    GiveawayInput:
+      type: object
+      required: [title, description, prize, taskDescription, endDate]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        prize:
+          type: string
+        taskDescription:
+          type: string
+        maxEntries:
+          type: integer
+          default: 100
+        endDate:
+          type: string
+          format: date-time
+
+    EnterGiveawayInput:
+      type: object
+      properties:
+        taskProof:
+          type: string
+
+    GiveawayEntry:
+      type: object
+      required: [id, giveawayId, userId, createdAt]
+      properties:
+        id:
+          type: integer
+        giveawayId:
+          type: integer
+        userId:
+          type: integer
+        username:
+          type: ["string", "null"]
+        taskProof:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    DrawResult:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        winnerUserId:
+          type: integer
+        winnerUsername:
+          type: ["string", "null"]

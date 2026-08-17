@@ -1,0 +1,6 @@
+{
+  "name": "Steam Family",
+  "description": "Steam account marketplace and community exchange platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

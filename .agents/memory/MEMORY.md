@@ -1,0 +1,2 @@
+- [Security hardening decisions](security-hardening.md) — XP farming fix, SSRF via avatar URL, ban bypass, session fixation, email whitelist, IP tracking all implemented.
+- [Supabase/Vercel database connectivity](supabase-vercel-connection.md) — use Supabase's pooler URL for Vercel serverless Postgres access; direct hosts can time out.

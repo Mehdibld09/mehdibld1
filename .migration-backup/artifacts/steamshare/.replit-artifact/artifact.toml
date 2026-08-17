@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "SteamShare"
+version = "1.0.0"
+id = "artifacts/steamshare"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19720
+
+[services.development]
+run = "pnpm --filter @workspace/steamshare run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/steamshare", "run", "build" ]
+publicDir = "artifacts/steamshare/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19720"
+BASE_PATH = "/"
