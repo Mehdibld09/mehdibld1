@@ -1,6 +1,6 @@
 {
-  "installCommand": "pnpm install --no-frozen-lockfile",
-  "buildCommand": "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/steamshare run build",
+  "installCommand": "npm install",
+  "buildCommand": "node artifacts/api-server/build.mjs && vite build --config artifacts/steamshare/vite.config.ts",
   "outputDirectory": "artifacts/steamshare/dist/public",
   "functions": {
     "api/index.mjs": {
