@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm install",
+  "installCommand": "npm install --legacy-peer-deps",
   "buildCommand": "node artifacts/api-server/build.mjs && vite build --config artifacts/steamshare/vite.config.ts",
   "outputDirectory": "artifacts/steamshare/dist/public",
   "functions": {
