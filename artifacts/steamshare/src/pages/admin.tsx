@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Fragment, useState, useEffect, type ReactNode } from "react";
-import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save } from "lucide-react";
+import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownEditor } from "@/components/markdown-editor";
 
@@ -303,6 +303,7 @@ export default function Admin() {
         { value: "pending", label: "Pending Reviews", icon: Hourglass, modAllowed: true, badge: pendingCount, badgeColor: "bg-amber-500/20 text-amber-500 border border-amber-500/30" },
         { value: "reports", label: "Reports", icon: Flag, modAllowed: true, badge: reportsCount, badgeColor: "bg-red-500/20 text-red-500 border border-red-500/30" },
         { value: "users", label: "Users", icon: Users, modAllowed: true },
+        { value: "giveaways", label: "Giveaway Manager", icon: Gift, modAllowed: true },
       ],
     },
     {
@@ -478,6 +479,7 @@ export default function Admin() {
                   {activeTab === "pending" && "Review and approve paid account listings before they go live on SteamShare."}
                   {activeTab === "reports" && "Investigate reported accounts and comments with instant Steam account checking & refund tools."}
                   {activeTab === "users" && "Manage user accounts, ban durations, moderator permissions, and points balances."}
+                  {activeTab === "giveaways" && "Manage site giveaways, verify task entries, draw random winners, and message giveaway winners directly."}
                   {activeTab === "dashboard" && "Real-time statistics, registrations, activity analytics, and circulation metrics."}
                   {activeTab === "store" && "Configure VIP and Premium store packages, pricing, and perks."}
                   {activeTab === "announcements" && "Broadcast site-wide news, alerts, and popup announcements instantly."}
@@ -494,6 +496,7 @@ export default function Admin() {
               {isAdmin && activeTab === "dashboard" && <DashboardTab />}
               {activeTab === "pending" && <PendingReviewTab />}
               {activeTab === "users" && <UsersTab isAdmin={isAdmin} />}
+              {activeTab === "giveaways" && <GiveawayManagerTab isAdmin={isAdmin} />}
               {activeTab === "reports" && <ReportsTab />}
               {isAdmin && activeTab === "store" && <StoreTab />}
               {isAdmin && activeTab === "announcements" && <AnnouncementsTab />}
@@ -521,6 +524,11 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
   const [pointsDelta, setPointsDelta] = useState(0);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
 
+  // Message User state
+  const [messageTarget, setMessageTarget] = useState<any>(null);
+  const [messageContent, setMessageContent] = useState("");
+  const [sendAsBot, setSendAsBot] = useState(false);
+
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -530,6 +538,34 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
   const { data: users = [], isLoading, isError, error } = useQuery({
     queryKey: ["admin-users", debouncedSearch],
     queryFn: () => fetchAdminUsers(debouncedSearch),
+  });
+
+  const sendMessageMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/users/${messageTarget.id}/message`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: messageContent.trim(), sendAsBot }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to send message");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Message Sent",
+        description: sendAsBot
+          ? `Automated notice delivered to @${messageTarget.username}`
+          : `Direct message sent to @${messageTarget.username}`,
+      });
+      setMessageTarget(null);
+      setMessageContent("");
+      setSendAsBot(false);
+    },
+    onError: (e: any) => toast({ title: "Error sending message", description: e.message, variant: "destructive" }),
   });
 
   const banMutation = useMutation({
@@ -617,6 +653,21 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1 flex-wrap">
+                      {/* Message User Button */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1 h-7 text-xs text-sky-600 border-sky-500/30 hover:bg-sky-500/10"
+                        onClick={() => {
+                          setMessageTarget(u);
+                          setMessageContent("");
+                          setSendAsBot(false);
+                        }}
+                        title={`Send message to @${u.username}`}
+                      >
+                        <MessageSquare className="h-3 w-3" /> Message
+                      </Button>
+
                       {/* Points (admin only) */}
                       {isAdmin && !u.isAdmin && (
                         <Button size="sm" variant="outline" className="gap-1 h-7 text-xs" onClick={() => { setPointsTarget(u); setPointsDelta(0); }}>
@@ -748,6 +799,1073 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
               {pointsMutation.isPending ? "Saving..." : `Apply ${pointsDelta > 0 ? "+" : ""}${pointsDelta} pts`}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Message User Dialog */}
+      <Dialog open={!!messageTarget} onOpenChange={(open) => !open && setMessageTarget(null)}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <MessageSquare className="h-5 w-5 text-sky-500" />
+              Message @{messageTarget?.username}
+            </DialogTitle>
+          </DialogHeader>
+          {messageTarget && (
+            <div className="space-y-4 pt-2">
+              {/* User Overview Card */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/25 flex items-center justify-center font-bold text-sm text-primary uppercase">
+                    {messageTarget.username?.slice(0, 2)}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-foreground flex items-center gap-1.5">
+                      <span>{messageTarget.username}</span>
+                      <span className="text-[11px] font-normal text-muted-foreground font-mono">#{messageTarget.id}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {messageTarget.points} pts • {messageTarget.isBanned ? "Banned" : "Active"}
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href="/messages"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
+                >
+                  <span>Open Chat</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              {/* Message Quick Presets */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quick Presets</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: "Listing Check", text: `Hello @${messageTarget.username}, please verify the login credentials for your active account listing.` },
+                    { label: "Points Award", text: `Hello @${messageTarget.username}, you have been awarded bonus points by the moderation team. Thank you!` },
+                    { label: "Community Guidelines", text: `Hello @${messageTarget.username}, please ensure your listings comply with our community sharing guidelines.` },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setMessageContent(preset.text)}
+                      className="text-[11px] px-2.5 py-1 rounded-md border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Message Textarea */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Message Content</label>
+                <textarea
+                  className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                  rows={4}
+                  placeholder={`Type a message to @${messageTarget.username}...`}
+                  value={messageContent}
+                  onChange={(e) => setMessageContent(e.target.value)}
+                />
+              </div>
+
+              {/* Send as Bot Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-bold text-foreground">Send as Admin Bot</p>
+                  <p className="text-[11px] text-muted-foreground">Deliver as an automated system notification</p>
+                </div>
+                <Switch checked={sendAsBot} onCheckedChange={setSendAsBot} />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => { setMessageTarget(null); setMessageContent(""); }}>
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 gap-1.5 bg-sky-600 hover:bg-sky-700 text-white"
+                  disabled={!messageContent.trim() || sendMessageMutation.isPending}
+                  onClick={() => sendMessageMutation.mutate()}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {sendMessageMutation.isPending ? "Sending..." : "Send Message"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+
+// --- Giveaway Manager Tab ---
+interface GiveawayItem {
+  id: number;
+  createdBy: number;
+  title: string;
+  description: string;
+  prize: string;
+  taskDescription: string;
+  taskLink: string | null;
+  taskCode: string | null;
+  maxEntries: number;
+  entriesCount: number;
+  endDate: string;
+  isActive: boolean;
+  autoApprove: boolean;
+  winnerUserId: number | null;
+  winnerUsername: string | null;
+  createdAt: string;
+}
+
+interface GiveawayEntryItem {
+  id: number;
+  giveawayId: number;
+  userId: number;
+  taskProof: string | null;
+  ipAddress: string | null;
+  isApproved: boolean;
+  isRejected: boolean;
+  createdAt: string;
+  username: string | null;
+}
+
+function GiveawayManagerTab({ isAdmin }: { isAdmin: boolean }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "ready" | "completed">("all");
+
+  // Create Modal
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPrize, setNewPrize] = useState("");
+  const [newTaskDesc, setNewTaskDesc] = useState("");
+  const [newTaskLink, setNewTaskLink] = useState("");
+  const [newTaskCode, setNewTaskCode] = useState("");
+  const [newMaxEntries, setNewMaxEntries] = useState(50);
+  const [newEndDate, setNewEndDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().slice(0, 16);
+  });
+  const [newAutoApprove, setNewAutoApprove] = useState(false);
+
+  // Entries Modal
+  const [selectedGiveawayForEntries, setSelectedGiveawayForEntries] = useState<GiveawayItem | null>(null);
+
+  // Direct User Messaging Modal (For Winner or Entrant)
+  const [messageTargetUser, setMessageTargetUser] = useState<{ id: number; username: string; context?: string } | null>(null);
+  const [messageText, setMessageText] = useState("");
+  const [sendAsAdminBot, setSendAsAdminBot] = useState(true);
+
+  // Fetch giveaways
+  const { data: giveaways = [], isLoading, isError, error } = useQuery<GiveawayItem[]>({
+    queryKey: ["admin-giveaways"],
+    queryFn: async () => {
+      const res = await fetch("/api/giveaways", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load giveaways");
+      return res.json();
+    },
+  });
+
+  // Fetch entries for selected giveaway
+  const { data: giveawayEntries = [], isLoading: loadingEntries } = useQuery<GiveawayEntryItem[]>({
+    queryKey: ["admin-giveaway-entries", selectedGiveawayForEntries?.id],
+    queryFn: async () => {
+      if (!selectedGiveawayForEntries) return [];
+      const res = await fetch(`/api/giveaways/${selectedGiveawayForEntries.id}/entries`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load giveaway entries");
+      return res.json();
+    },
+    enabled: !!selectedGiveawayForEntries,
+  });
+
+  // Create Giveaway Mutation
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/giveaways", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTitle.trim(),
+          description: newDesc.trim(),
+          prize: newPrize.trim(),
+          taskDescription: newTaskDesc.trim(),
+          taskLink: newTaskLink.trim() || null,
+          taskCode: newTaskCode.trim() || null,
+          maxEntries: Number(newMaxEntries) || 50,
+          endDate: new Date(newEndDate).toISOString(),
+          autoApprove: newAutoApprove,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to create giveaway");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-giveaways"] });
+      queryClient.invalidateQueries({ queryKey: ["giveaways"] });
+      toast({ title: "Giveaway created successfully!" });
+      setShowCreateModal(false);
+      setNewTitle("");
+      setNewDesc("");
+      setNewPrize("");
+      setNewTaskDesc("");
+      setNewTaskLink("");
+      setNewTaskCode("");
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Draw Winner Mutation
+  const drawMutation = useMutation({
+    mutationFn: async (giveawayId: number) => {
+      const res = await fetch(`/api/giveaways/${giveawayId}/draw`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to draw winner");
+      }
+      return res.json() as Promise<{ winnerUserId: number; winnerUsername: string }>;
+    },
+    onSuccess: (data, giveawayId) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-giveaways"] });
+      queryClient.invalidateQueries({ queryKey: ["giveaways"] });
+      toast({
+        title: "🎉 Winner Drawn!",
+        description: `Winner: @${data.winnerUsername} (ID #${data.winnerUserId})`,
+      });
+      // Automatically prompt to text the winner
+      const gw = giveaways.find((g) => g.id === giveawayId);
+      if (gw && data.winnerUserId) {
+        openMessageModal({
+          id: data.winnerUserId,
+          username: data.winnerUsername,
+          context: `giveaway_winner:${gw.title}:${gw.prize}`,
+        });
+      }
+    },
+    onError: (e: any) => toast({ title: "Cannot draw winner", description: e.message, variant: "destructive" }),
+  });
+
+  // Delete Giveaway Mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (giveawayId: number) => {
+      const res = await fetch(`/api/giveaways/${giveawayId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to delete giveaway");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-giveaways"] });
+      queryClient.invalidateQueries({ queryKey: ["giveaways"] });
+      toast({ title: "Giveaway deleted" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Approve Entry Mutation
+  const approveEntryMutation = useMutation({
+    mutationFn: async ({ giveawayId, entryId }: { giveawayId: number; entryId: number }) => {
+      const res = await fetch(`/api/giveaways/${giveawayId}/entries/${entryId}/approve`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to approve entry");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-giveaway-entries", selectedGiveawayForEntries?.id] });
+      toast({ title: "Entry approved!" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Reject Entry Mutation
+  const rejectEntryMutation = useMutation({
+    mutationFn: async ({ giveawayId, entryId }: { giveawayId: number; entryId: number }) => {
+      const res = await fetch(`/api/giveaways/${giveawayId}/entries/${entryId}/reject`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to reject entry");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-giveaway-entries", selectedGiveawayForEntries?.id] });
+      toast({ title: "Entry rejected" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Send Message Mutation (To winner or entrant)
+  const sendMessageMutation = useMutation({
+    mutationFn: async () => {
+      if (!messageTargetUser) return;
+      const res = await fetch(`/api/admin/users/${messageTargetUser.id}/message`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: messageText.trim(),
+          sendAsBot: sendAsAdminBot,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to send message");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Message Delivered",
+        description: `Successfully texted @${messageTargetUser?.username}!`,
+      });
+      setMessageTargetUser(null);
+      setMessageText("");
+    },
+    onError: (e: any) => toast({ title: "Error sending message", description: e.message, variant: "destructive" }),
+  });
+
+  const openMessageModal = (target: { id: number; username: string; context?: string }) => {
+    setMessageTargetUser(target);
+    if (target.context?.startsWith("giveaway_winner:")) {
+      const parts = target.context.split(":");
+      const title = parts[1] || "Giveaway";
+      const prize = parts[2] || "Prize";
+      setMessageText(
+        `🎉 Congratulations @${target.username}!\n\nYou have been selected as the official winner of our giveaway for "${title}" (${prize})!\n\nPlease reply to this message with any requested details to claim your reward. Thank you for participating on SteamShare!`
+      );
+      setSendAsAdminBot(true);
+    } else {
+      setMessageText("");
+      setSendAsAdminBot(false);
+    }
+  };
+
+  // Filter and search giveaways
+  const filteredGiveaways = giveaways.filter((g) => {
+    const isEnded = new Date() > new Date(g.endDate);
+    const hasWinner = !!g.winnerUserId;
+    const isFull = g.entriesCount >= g.maxEntries;
+
+    if (statusFilter === "active" && (!g.isActive || isEnded || hasWinner)) return false;
+    if (statusFilter === "ready" && (hasWinner || (!isEnded && !isFull && g.isActive))) return false;
+    if (statusFilter === "completed" && !hasWinner) return false;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const matchTitle = g.title.toLowerCase().includes(q);
+      const matchPrize = g.prize.toLowerCase().includes(q);
+      const matchWinner = g.winnerUsername?.toLowerCase().includes(q);
+      if (!matchTitle && !matchPrize && !matchWinner) return false;
+    }
+
+    return true;
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header & Actions Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-card border border-border p-4 rounded-xl shadow-xs">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <Input
+            placeholder="Search title, prize, winner..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full sm:w-64 h-9 text-xs"
+          />
+
+          <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
+            {(
+              [
+                { id: "all", label: "All" },
+                { id: "active", label: "Active" },
+                { id: "ready", label: "Ready to Draw" },
+                { id: "completed", label: "Completed" },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                  statusFilter === tab.id
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isAdmin && (
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="gap-1.5 h-9 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs w-full sm:w-auto"
+          >
+            <Plus className="h-4 w-4" />
+            Create Giveaway
+          </Button>
+        )}
+      </div>
+
+      {isError && (
+        <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+          Failed to load giveaways: {(error as any)?.message ?? "Unknown error"}
+        </div>
+      )}
+
+      {/* Giveaways Grid */}
+      {isLoading ? (
+        <div className="text-center py-16 text-muted-foreground text-sm flex items-center justify-center gap-2">
+          <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+          Loading giveaways...
+        </div>
+      ) : filteredGiveaways.length === 0 ? (
+        <div className="text-center py-16 bg-card border border-dashed border-border rounded-xl">
+          <Gift className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-foreground">No giveaways found</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {search ? "Try adjusting your search criteria" : "Create a new giveaway to reward community members"}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filteredGiveaways.map((gw) => {
+            const isEnded = new Date() > new Date(gw.endDate);
+            const hasWinner = !!gw.winnerUserId;
+            const isFull = gw.entriesCount >= gw.maxEntries;
+
+            return (
+              <div
+                key={gw.id}
+                className={`bg-card border rounded-xl p-5 flex flex-col justify-between gap-4 transition-all shadow-xs ${
+                  hasWinner
+                    ? "border-amber-500/30 bg-amber-500/[0.02]"
+                    : gw.isActive
+                    ? "border-border hover:border-primary/40"
+                    : "border-border/60 opacity-80"
+                }`}
+              >
+                {/* Card Header */}
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-base text-foreground flex items-center gap-1.5">
+                          <span>{gw.title}</span>
+                          <span className="text-xs text-muted-foreground font-mono">#{gw.id}</span>
+                        </h3>
+                        {hasWinner ? (
+                          <Badge className="bg-amber-500/15 text-amber-500 border-amber-500/30 text-[10px] gap-1 py-0.5">
+                            <Trophy className="h-3 w-3" /> Winner Drawn
+                          </Badge>
+                        ) : gw.isActive && !isEnded ? (
+                          <Badge className="bg-green-500/15 text-green-500 border-green-500/30 text-[10px] gap-1 py-0.5">
+                            <Sparkles className="h-3 w-3" /> Active
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px] gap-1 py-0.5">
+                            <Clock className="h-3 w-3" /> Ended
+                          </Badge>
+                        )}
+                        {gw.autoApprove && (
+                          <Badge variant="outline" className="text-[10px] py-0.5 text-blue-400 border-blue-500/30">
+                            Auto-Approve
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{gw.description}</p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-xs font-bold text-primary px-2.5 py-1 bg-primary/10 rounded-md border border-primary/20 block">
+                        🎁 {gw.prize}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Task & Code details */}
+                  <div className="bg-muted/30 border border-border/80 rounded-lg p-2.5 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="font-medium text-foreground">Task Requirement:</span>
+                      {gw.taskLink && (
+                        <a
+                          href={gw.taskLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline flex items-center gap-1 text-[11px]"
+                        >
+                          <span>Task Link</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                    </div>
+                    <p className="text-muted-foreground">{gw.taskDescription}</p>
+                    {gw.taskCode && (
+                      <p className="text-[11px] text-amber-500 font-mono">
+                        Verification Code: <span className="bg-background px-1.5 py-0.5 rounded border border-border">{gw.taskCode}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Stats Progress */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1">
+                    <div className="bg-background border border-border rounded-lg p-2">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Entries</span>
+                      <span className="font-mono font-bold text-foreground">
+                        {gw.entriesCount} / {gw.maxEntries}
+                      </span>
+                    </div>
+                    <div className="bg-background border border-border rounded-lg p-2">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">End Date</span>
+                      <span className="font-medium text-foreground">
+                        {new Date(gw.endDate).toLocaleDateString()} {new Date(gw.endDate).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div className="bg-background border border-border rounded-lg p-2 col-span-2 sm:col-span-1">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Created</span>
+                      <span className="text-muted-foreground">{new Date(gw.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+
+                  {/* WINNER SHOWCASE BANNER (with Text Winner Button) */}
+                  {hasWinner ? (
+                    <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 shrink-0">
+                          <Trophy className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-amber-500 font-bold uppercase tracking-wider">Official Winner</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(gw.winnerUsername || "");
+                                toast({ title: "Winner username copied!" });
+                              }}
+                              className="text-muted-foreground hover:text-foreground"
+                              title="Copy username"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <p className="text-sm font-bold text-foreground">
+                            @{gw.winnerUsername} <span className="text-xs text-muted-foreground font-normal font-mono">(ID #{gw.winnerUserId})</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Primary Text Winner Button */}
+                      <Button
+                        size="sm"
+                        className="gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black shadow-xs"
+                        onClick={() =>
+                          openMessageModal({
+                            id: gw.winnerUserId!,
+                            username: gw.winnerUsername!,
+                            context: `giveaway_winner:${gw.title}:${gw.prize}`,
+                          })
+                        }
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Text Winner
+                      </Button>
+                    </div>
+                  ) : isEnded || isFull ? (
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-blue-400" />
+                        <span className="text-xs text-blue-300 font-medium">
+                          Giveaway ended with {gw.entriesCount} entries. Ready to draw a winner!
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                        disabled={drawMutation.isPending || gw.entriesCount === 0}
+                        onClick={() => drawMutation.mutate(gw.id)}
+                      >
+                        <Trophy className="h-3.5 w-3.5" />
+                        Draw Winner Now
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* Card Actions Footer */}
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-border flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* View & Review Entrants */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 h-8 text-xs font-medium border-border"
+                      onClick={() => setSelectedGiveawayForEntries(gw)}
+                    >
+                      <Users className="h-3.5 w-3.5 text-primary" />
+                      View Entrants & Tasks ({gw.entriesCount})
+                    </Button>
+
+                    {/* Draw winner button if no winner yet */}
+                    {!hasWinner && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 h-8 text-xs font-medium text-amber-500 border-amber-500/30 hover:bg-amber-500/10"
+                        disabled={drawMutation.isPending || gw.entriesCount === 0}
+                        onClick={() => {
+                          if (window.confirm(`Draw a random verified winner for "${gw.title}"?`)) {
+                            drawMutation.mutate(gw.id);
+                          }
+                        }}
+                      >
+                        <Trophy className="h-3.5 w-3.5" />
+                        Draw Winner
+                      </Button>
+                    )}
+                  </div>
+
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        if (window.confirm(`Delete giveaway "${gw.title}"? This cannot be undone.`)) {
+                          deleteMutation.mutate(gw.id);
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* CREATE GIVEAWAY MODAL */}
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="bg-card border-border max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Gift className="h-5 w-5 text-primary" />
+              Create Community Giveaway
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Giveaway Title *</label>
+              <Input
+                placeholder="e.g. Elden Ring DLC or 2,500 Steam Points"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Prize Name *</label>
+                <Input
+                  placeholder="e.g. $50 Steam Wallet Card"
+                  value={newPrize}
+                  onChange={(e) => setNewPrize(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Max Entries Limit</label>
+                <Input
+                  type="number"
+                  value={newMaxEntries}
+                  onChange={(e) => setNewMaxEntries(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Description *</label>
+              <textarea
+                className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={2}
+                placeholder="Briefly describe what this giveaway is celebrating..."
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Task Requirements *</label>
+              <textarea
+                className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={2}
+                placeholder="e.g. Join our Telegram group, comment on our latest YouTube video, or share a listing"
+                value={newTaskDesc}
+                onChange={(e) => setNewTaskDesc(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Task URL / Link</label>
+                <Input
+                  placeholder="https://t.me/yourgroup"
+                  value={newTaskLink}
+                  onChange={(e) => setNewTaskLink(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Secret Task Code (Optional)</label>
+                <Input
+                  placeholder="e.g. STEAMSHARE2026"
+                  value={newTaskCode}
+                  onChange={(e) => setNewTaskCode(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">End Date & Time *</label>
+              <Input
+                type="datetime-local"
+                value={newEndDate}
+                onChange={(e) => setNewEndDate(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-foreground">Auto-Approve Entries</p>
+                <p className="text-[11px] text-muted-foreground">
+                  If enabled, entries are approved automatically without manual review
+                </p>
+              </div>
+              <Switch checked={newAutoApprove} onCheckedChange={setNewAutoApprove} />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowCreateModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 font-semibold"
+                disabled={!newTitle || !newPrize || !newDesc || !newTaskDesc || createMutation.isPending}
+                onClick={() => createMutation.mutate()}
+              >
+                {createMutation.isPending ? "Creating..." : "Publish Giveaway"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* VIEW ENTRANTS & TASKS MODAL */}
+      <Dialog
+        open={!!selectedGiveawayForEntries}
+        onOpenChange={(open) => !open && setSelectedGiveawayForEntries(null)}
+      >
+        <DialogContent className="bg-card border-border max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between gap-2 text-foreground">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                <span>Entrants for "{selectedGiveawayForEntries?.title}"</span>
+              </div>
+              <span className="text-xs font-normal text-muted-foreground">
+                Total: {giveawayEntries.length} / {selectedGiveawayForEntries?.maxEntries}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            {loadingEntries ? (
+              <div className="text-center py-10 text-muted-foreground text-sm">Loading entrants...</div>
+            ) : giveawayEntries.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground text-xs bg-muted/20 rounded-xl border border-border">
+                No users have entered this giveaway yet.
+              </div>
+            ) : (
+              <div className="border border-border rounded-xl overflow-hidden overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow>
+                      <TableHead>Entrant</TableHead>
+                      <TableHead>Task Proof</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {giveawayEntries.map((entry) => {
+                      const isWinner = selectedGiveawayForEntries?.winnerUserId === entry.userId;
+
+                      return (
+                        <TableRow key={entry.id} className={isWinner ? "bg-amber-500/10" : ""}>
+                          <TableCell>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-sm text-foreground">@{entry.username ?? `User #${entry.userId}`}</span>
+                                {isWinner && (
+                                  <Badge className="bg-amber-500 text-black text-[9px] font-bold px-1.5 py-0">
+                                    WINNER
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-muted-foreground font-mono">
+                                IP: {entry.ipAddress || "Hidden"} • {new Date(entry.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="max-w-xs">
+                            {entry.taskProof ? (
+                              <div className="space-y-1">
+                                {entry.taskProof.startsWith("http") ? (
+                                  <a
+                                    href={entry.taskProof}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-primary hover:underline flex items-center gap-1 font-mono truncate max-w-[200px]"
+                                  >
+                                    <span>{entry.taskProof}</span>
+                                    <ExternalLink className="h-3 w-3 shrink-0" />
+                                  </a>
+                                ) : (
+                                  <p className="text-xs text-foreground bg-muted/40 p-1.5 rounded font-mono break-all">
+                                    {entry.taskProof}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">No proof provided</span>
+                            )}
+                          </TableCell>
+
+                          <TableCell>
+                            {entry.isApproved ? (
+                              <Badge className="bg-green-500/15 text-green-500 border-green-500/30 text-[10px]">
+                                Approved
+                              </Badge>
+                            ) : entry.isRejected ? (
+                              <Badge variant="destructive" className="text-[10px]">
+                                Rejected
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">
+                                Pending Review
+                              </Badge>
+                            )}
+                          </TableCell>
+
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1 flex-wrap">
+                              {/* Message Entrant Button */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1 text-sky-500 border-sky-500/30 hover:bg-sky-500/10"
+                                onClick={() =>
+                                  openMessageModal({
+                                    id: entry.userId,
+                                    username: entry.username || `User #${entry.userId}`,
+                                    context: isWinner
+                                      ? `giveaway_winner:${selectedGiveawayForEntries?.title}:${selectedGiveawayForEntries?.prize}`
+                                      : undefined,
+                                  })
+                                }
+                                title={`Text @${entry.username}`}
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                                Text
+                              </Button>
+
+                              {/* Approve */}
+                              {!entry.isApproved && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1 text-green-600 border-green-500/30 hover:bg-green-500/10"
+                                  onClick={() =>
+                                    approveEntryMutation.mutate({
+                                      giveawayId: selectedGiveawayForEntries!.id,
+                                      entryId: entry.id,
+                                    })
+                                  }
+                                  disabled={approveEntryMutation.isPending}
+                                >
+                                  <Check className="h-3 w-3" />
+                                </Button>
+                              )}
+
+                              {/* Reject */}
+                              {!entry.isRejected && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1 text-red-500 border-red-500/30 hover:bg-red-500/10"
+                                  onClick={() =>
+                                    rejectEntryMutation.mutate({
+                                      giveawayId: selectedGiveawayForEntries!.id,
+                                      entryId: entry.id,
+                                    })
+                                  }
+                                  disabled={rejectEntryMutation.isPending}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* TEXT WINNER / USER DIRECT MESSAGING MODAL */}
+      <Dialog
+        open={!!messageTargetUser}
+        onOpenChange={(open) => !open && setMessageTargetUser(null)}
+      >
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <MessageSquare className="h-5 w-5 text-amber-500" />
+              Text @{messageTargetUser?.username}
+            </DialogTitle>
+          </DialogHeader>
+
+          {messageTargetUser && (
+            <div className="space-y-4 pt-2">
+              {/* Entrant Profile Header */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center font-bold text-sm text-amber-500 uppercase">
+                    {messageTargetUser.username?.slice(0, 2)}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-foreground">@{messageTargetUser.username}</p>
+                    <p className="text-xs text-muted-foreground font-mono">User ID #{messageTargetUser.id}</p>
+                  </div>
+                </div>
+                <a
+                  href="/messages"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
+                >
+                  <span>Chat View</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              {/* Message Quick Presets */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Quick Presets
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    {
+                      label: "🎉 Winner Announcement",
+                      text: `🎉 Congratulations @${messageTargetUser.username}! You are the winner of our giveaway! Please reply with your delivery details to claim your reward.`,
+                    },
+                    {
+                      label: "⚠ Task Verification",
+                      text: `Hello @${messageTargetUser.username}, please verify your submission or link for the giveaway task.`,
+                    },
+                    {
+                      label: "🎁 Bonus Reward",
+                      text: `Hello @${messageTargetUser.username}, as a thank you for participating in our giveaway, bonus points have been added to your account!`,
+                    },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setMessageText(preset.text)}
+                      className="text-[11px] px-2.5 py-1 rounded-md border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text Message Area */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Message</label>
+                <textarea
+                  className="w-full border border-border rounded-lg px-3 py-2 bg-background text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
+                  rows={5}
+                  placeholder={`Write your direct message to @${messageTargetUser.username}...`}
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                />
+              </div>
+
+              {/* Send As Bot Switch */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-bold text-foreground">Send as Admin Bot Notification</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Deliver as official automated notification badge
+                  </p>
+                </div>
+                <Switch checked={sendAsAdminBot} onCheckedChange={setSendAsAdminBot} />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setMessageTargetUser(null);
+                    setMessageText("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 gap-1.5 bg-amber-500 hover:bg-amber-600 text-black font-semibold"
+                  disabled={!messageText.trim() || sendMessageMutation.isPending}
+                  onClick={() => sendMessageMutation.mutate()}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {sendMessageMutation.isPending ? "Sending..." : "Send to User"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

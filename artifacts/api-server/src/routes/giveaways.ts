@@ -2,7 +2,7 @@
 import express from "express";
 import { db, giveawaysTable, giveawayEntriesTable, usersTable } from "@workspace/db";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireModOrAdmin } from "../middlewares/auth";
 
 const router = express.Router();
 
@@ -154,7 +154,7 @@ router.post("/:giveawayId/enter", requireAuth, async (req, res) => {
   res.json({ message: "Entered successfully", autoApproved: shouldAutoApprove });
 });
 
-router.get("/:giveawayId/entries", requireAdmin, async (req, res) => {
+router.get("/:giveawayId/entries", requireModOrAdmin, async (req, res) => {
   const giveawayId = parseInt(req.params.giveawayId, 10);
   const entries = await db
     .select({
@@ -175,7 +175,7 @@ router.get("/:giveawayId/entries", requireAdmin, async (req, res) => {
 });
 
 // Approve an entry
-router.patch("/:giveawayId/entries/:entryId/approve", requireAdmin, async (req, res) => {
+router.patch("/:giveawayId/entries/:entryId/approve", requireModOrAdmin, async (req, res) => {
   const entryId = parseInt(req.params.entryId, 10);
   await db.update(giveawayEntriesTable)
     .set({ isApproved: true, isRejected: false })
@@ -184,7 +184,7 @@ router.patch("/:giveawayId/entries/:entryId/approve", requireAdmin, async (req, 
 });
 
 // Reject an entry
-router.patch("/:giveawayId/entries/:entryId/reject", requireAdmin, async (req, res) => {
+router.patch("/:giveawayId/entries/:entryId/reject", requireModOrAdmin, async (req, res) => {
   const entryId = parseInt(req.params.entryId, 10);
   await db.update(giveawayEntriesTable)
     .set({ isApproved: false, isRejected: true })
@@ -192,7 +192,7 @@ router.patch("/:giveawayId/entries/:entryId/reject", requireAdmin, async (req, r
   res.json({ ok: true });
 });
 
-router.post("/:giveawayId/draw", requireAdmin, async (req, res) => {
+router.post("/:giveawayId/draw", requireModOrAdmin, async (req, res) => {
   const giveawayId = parseInt(req.params.giveawayId, 10);
 
   // Fetch giveaway to check autoApprove

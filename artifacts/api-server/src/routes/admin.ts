@@ -1,6 +1,6 @@
 // @ts-nocheck
 import express from "express";
-import { db, usersTable, accountsTable, reportsTable, commentsTable, ipBansTable, accountClaimsTable } from "@workspace/db";
+import { db, usersTable, accountsTable, reportsTable, commentsTable, ipBansTable, accountClaimsTable, messagesTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, isNotNull, or } from "drizzle-orm";
 import { requireAdmin, requireModOrAdmin } from "../middlewares/auth";
 import { sendBotMessage } from "../lib/adminBot";
@@ -242,6 +242,41 @@ router.post("/users/:userId/points", requireAdmin, async (req, res) => {
     .set({ points: sql`GREATEST(${usersTable.points} + ${delta}, 0)` })
     .where(eq(usersTable.id, userId));
   res.json({ message: `Points adjusted by ${delta}` });
+});
+
+// Message user directly or via Admin Bot
+router.post("/users/:userId/message", requireModOrAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const { content, sendAsBot } = req.body as { content: string; sendAsBot?: boolean };
+
+  if (!content || !content.trim()) {
+    res.status(400).json({ error: "Message content cannot be empty" });
+    return;
+  }
+
+  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!target) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  if (sendAsBot) {
+    await sendBotMessage(userId, content.trim());
+    res.json({ ok: true, message: "Bot notification sent successfully" });
+  } else {
+    const senderId = req.session.userId!;
+    if (senderId === userId) {
+      res.status(400).json({ error: "Cannot message yourself" });
+      return;
+    }
+    const [msg] = await db.insert(messagesTable).values({
+      senderId,
+      receiverId: userId,
+      content: content.trim(),
+      isRead: false,
+    }).returning();
+    res.json({ ok: true, message: "Direct message sent successfully", data: msg });
+  }
 });
 
 // --- Pending Account Reviews ---
