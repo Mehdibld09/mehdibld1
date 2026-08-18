@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Fragment, useState, useEffect, type ReactNode } from "react";
-import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal } from "lucide-react";
+import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownEditor } from "@/components/markdown-editor";
 
@@ -438,21 +438,12 @@ export default function Admin() {
               <div className="flex-1">
                 {renderNavList()}
               </div>
-
-              <div className="pt-4 mt-4 border-t border-border">
-                <button
-                  onClick={() => { setMobileMenuOpen(false); window.history.back(); }}
-                  className="w-full flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground py-2 rounded-lg bg-secondary/50 transition-colors"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" /> Back to SteamShare
-                </button>
-              </div>
             </div>
           </div>
         )}
 
         {/* Main Grid Container with Desktop Sidebar */}
-        <div className="max-w-7xl mx-auto flex">
+        <div className="w-full flex">
           {/* Desktop Left Sidebar */}
           <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-border bg-card/60 min-h-[calc(100vh-4rem)] p-4 space-y-6">
             {/* Brand Header */}
@@ -472,25 +463,6 @@ export default function Admin() {
             <nav className="flex-1 space-y-1">
               {renderNavList()}
             </nav>
-
-            {/* User Profile / Footer status */}
-            <div className="pt-4 border-t border-border space-y-3">
-              <div className="flex items-center gap-2.5 px-2">
-                <div className="w-7 h-7 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-primary text-xs font-bold">
-                  {user?.username?.[0]?.toUpperCase() ?? "A"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-foreground truncate">@{user?.username}</p>
-                  <p className="text-[10px] text-muted-foreground">{user?.points ?? 0} pts · Lvl {user?.level ?? 1}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => window.history.back()}
-                className="w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" /> Back to SteamShare
-              </button>
-            </div>
           </aside>
 
           {/* Main Content Area */}
@@ -3423,9 +3395,23 @@ function PendingReviewTab() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const parseGamesArray = (raw: any): string[] => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        return raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  };
+
   const initAccountState = (acc: any) => {
     if (allGamesList[acc.id] === undefined) {
-      const initialGames = [...(acc.games ?? [])];
+      const initialGames = parseGamesArray(acc.games);
       setAllGamesList((prev) => ({ ...prev, [acc.id]: initialGames }));
       setGameSelections((prev) => ({ ...prev, [acc.id]: initialGames }));
       setPriceEdits((prev) => ({ ...prev, [acc.id]: acc.pointsCost ?? 0 }));
@@ -3435,11 +3421,11 @@ function PendingReviewTab() {
   };
 
   const getAccountGames = (acc: any): string[] => {
-    return allGamesList[acc.id] ?? (acc.games ?? []);
+    return allGamesList[acc.id] ?? parseGamesArray(acc.games);
   };
 
   const getSelectedGames = (acc: any): string[] => {
-    return gameSelections[acc.id] ?? (acc.games ?? []);
+    return gameSelections[acc.id] ?? parseGamesArray(acc.games);
   };
 
   const toggleGame = (accountId: number, game: string) => {

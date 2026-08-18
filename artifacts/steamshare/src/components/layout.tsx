@@ -23,7 +23,7 @@ export function Layout({ children }: { children: React.ReactNode; noFooter?: boo
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
+        <div className="w-full flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
           <a href="/admin" className="flex items-center gap-3">
             <span className="font-black text-xl tracking-tight text-foreground">Steam Family</span>
           </a>
