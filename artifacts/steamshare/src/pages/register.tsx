@@ -101,14 +101,14 @@ export default function Register() {
   return (
     <div className="min-h-screen bg-background flex">
       {/* Left panel — game collage */}
-      <div className="hidden lg:block lg:w-1/2 relative overflow-hidden">
+      <div className="hidden lg:block lg:w-1/2 relative overflow-hidden bg-muted/20">
         <img
           src="/games-collage-new.png"
-          alt=""
-          className="absolute inset-0 w-full h-full"
-          style={{ objectFit: "cover", objectPosition: "center" }}
+          alt="Steam Family Games"
+          referrerPolicy="no-referrer"
+          className="absolute inset-0 w-full h-full object-cover object-center"
         />
-        <div className="absolute inset-0 bg-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20" />
       </div>
 
       {/* Right panel — form */}

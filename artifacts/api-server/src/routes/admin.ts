@@ -536,11 +536,12 @@ router.post("/reports/:reportId/refund", requireModOrAdmin, async (req, res) => 
     .set({ isActioned: true, isDismissed: true })
     .where(eq(reportsTable.id, reportId));
 
-  // Send refund message via Admin Bot
-  const accTitle = account?.title ? `**${account.title}**` : `account #${report.targetId}`;
+  // Send refund message directly via Admin Bot
+  const customMessage = req.body?.message?.trim();
+  const botMessageText = customMessage || `Report approved and ${refundAmount} points refunded`;
   await sendBotMessage(
     report.reporterId,
-    `💰 **Refund Processed**: You have been refunded **${refundAmount} points** for ${accTitle} following your report (#${report.id}). Your points balance has been updated. Thank you for your patience!`,
+    botMessageText,
   ).catch(() => {});
 
   res.json({ ok: true, amount: refundAmount, message: `Refund of ${refundAmount} points issued successfully` });

@@ -881,7 +881,7 @@ function ReportsTab() {
   const [deleteContent, setDeleteContent] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
 
-  // Check account state per accountId
+  // Check account state per reportId (so each report card has independent isolated state)
   const [checkStates, setCheckStates] = useState<Record<number, { loading: boolean; status?: string; message?: string; checkStatus?: string; lastChecked?: string }>>({});
 
   // Message modal state
@@ -917,14 +917,18 @@ function ReportsTab() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  async function handleCheckAccount(accountId: number) {
-    setCheckStates((p) => ({ ...p, [accountId]: { loading: true } }));
+  async function handleCheckAccount(reportId: number, accountId: number) {
+    if (!accountId) {
+      toast({ title: "Check failed", description: "No valid account ID associated with this report.", variant: "destructive" });
+      return;
+    }
+    setCheckStates((p) => ({ ...p, [reportId]: { loading: true } }));
     try {
       const res = await fetch(`/api/accounts/${accountId}/check`, { method: "POST", credentials: "include" });
       const data = await res.json();
       setCheckStates((p) => ({
         ...p,
-        [accountId]: {
+        [reportId]: {
           loading: false,
           status: data.status,
           message: data.message,
@@ -942,7 +946,7 @@ function ReportsTab() {
         toast({ title: "Check Result", description: data.message || data.status });
       }
     } catch (e: any) {
-      setCheckStates((p) => ({ ...p, [accountId]: { loading: false, status: "error", message: e.message } }));
+      setCheckStates((p) => ({ ...p, [reportId]: { loading: false, status: "error", message: e.message } }));
       toast({ title: "Check failed", description: e.message, variant: "destructive" });
     }
   }
@@ -1057,8 +1061,8 @@ function ReportsTab() {
       ) : (
         <div className="space-y-3">
           {filtered.map((report: any) => {
-            const isAccount = report.targetType === "account";
-            const accountCheck = isAccount ? checkStates[report.targetId] : null;
+            const isAccount = report.targetType === "account" && Boolean(report.targetId);
+            const accountCheck = isAccount ? checkStates[report.id] : null;
             const refundPointsValue = report.claimedPoints ?? report.accountCost ?? 0;
 
             return (
@@ -1171,10 +1175,14 @@ function ReportsTab() {
                     {/* Check Account Button */}
                     {isAccount && (
                       <Button
+                        type="button"
                         size="sm"
                         variant="outline"
                         className="h-8 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
-                        onClick={() => handleCheckAccount(report.targetId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCheckAccount(report.id, report.targetId);
+                        }}
                         disabled={accountCheck?.loading}
                       >
                         <RefreshCw className={`h-3.5 w-3.5 ${accountCheck?.loading ? "animate-spin" : ""}`} />
@@ -1387,6 +1395,16 @@ function ReportsTab() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   Original purchase cost: {refundTarget.points} points.
+                </p>
+              </div>
+
+              <div className="bg-secondary/40 border border-border rounded-lg p-2.5 space-y-1 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                  <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                  <span>Admin Bot direct message:</span>
+                </div>
+                <p className="font-mono text-[11px] text-foreground bg-background/80 px-2.5 py-1.5 rounded border border-border">
+                  Report approved and {refundAmount} points refunded
                 </p>
               </div>
 
