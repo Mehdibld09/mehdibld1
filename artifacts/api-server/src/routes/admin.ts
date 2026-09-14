@@ -315,6 +315,10 @@ router.get("/reports", requireModOrAdmin, async (req, res) => {
     .filter((r) => r.targetType === "comment")
     .map((r) => r.targetId);
 
+  const accountTargetIds = reports
+    .filter((r) => r.targetType === "account")
+    .map((r) => r.targetId);
+
   let commentMap: Record<number, { content: string; authorId: number; authorUsername: string }> = {};
   if (commentTargetIds.length > 0) {
     const comments = await db
@@ -337,11 +341,41 @@ router.get("/reports", requireModOrAdmin, async (req, res) => {
     }
   }
 
+  let accountMap: Record<number, { title: string; status: string; pointsCost: number; steamUsername: string; games: string[] }> = {};
+  if (accountTargetIds.length > 0) {
+    const accounts = await db
+      .select({
+        id: accountsTable.id,
+        title: accountsTable.title,
+        status: accountsTable.status,
+        pointsCost: accountsTable.pointsCost,
+        steamUsername: accountsTable.steamUsername,
+        games: accountsTable.games,
+      })
+      .from(accountsTable)
+      .where(inArray(accountsTable.id, accountTargetIds));
+
+    for (const a of accounts) {
+      accountMap[a.id] = {
+        title: a.title,
+        status: a.status,
+        pointsCost: a.pointsCost,
+        steamUsername: a.steamUsername,
+        games: a.games ?? [],
+      };
+    }
+  }
+
   const enriched = reports.map((r) => ({
     ...r,
     commentContent: r.targetType === "comment" ? (commentMap[r.targetId]?.content ?? null) : null,
     commentAuthorId: r.targetType === "comment" ? (commentMap[r.targetId]?.authorId ?? null) : null,
     commentAuthorUsername: r.targetType === "comment" ? (commentMap[r.targetId]?.authorUsername ?? null) : null,
+    accountTitle: r.targetType === "account" ? (accountMap[r.targetId]?.title ?? null) : null,
+    accountStatus: r.targetType === "account" ? (accountMap[r.targetId]?.status ?? null) : null,
+    accountCost: r.targetType === "account" ? (accountMap[r.targetId]?.pointsCost ?? null) : null,
+    accountUsername: r.targetType === "account" ? (accountMap[r.targetId]?.steamUsername ?? null) : null,
+    accountGames: r.targetType === "account" ? (accountMap[r.targetId]?.games ?? null) : null,
   }));
 
   res.json(enriched);

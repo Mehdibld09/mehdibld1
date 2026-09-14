@@ -21,7 +21,7 @@ async function startServer() {
     const distPublicPath = path.resolve(process.cwd(), "artifacts/steamshare/dist/public");
     const staticDir = fs.existsSync(distPublicPath) ? distPublicPath : distPath;
     app.use(express.static(staticDir));
-    app.get("*", (_req, res) => {
+    app.get("*all", (_req, res) => {
       res.sendFile(path.join(staticDir, "index.html"));
     });
   }

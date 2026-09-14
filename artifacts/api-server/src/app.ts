@@ -52,14 +52,14 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(
   session({
-    store: new PgSession({
+    store: process.env.DATABASE_URL ? new PgSession({
       pool,
       createTableIfMissing: true,
       // Don't UPDATE the session row on every request just to bump `expire` —
       // that's an extra DB write per API call. Sessions already get a fresh
       // maxAge on login; this just stops the unnecessary churn.
       disableTouch: true,
-    }),
+    }) : new session.MemoryStore(),
     secret: process.env.SESSION_SECRET ?? (() => {
       if (process.env.NODE_ENV === "production") {
         console.warn("[WARN] SESSION_SECRET is not set — using fallback. Set SESSION_SECRET in your environment variables.");
@@ -164,10 +164,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   }
 
   logger.error(
-    { err, method: req.method, url: req.originalUrl?.split("?")[0] },
+    { err, stack: err.stack, method: req.method, url: req.originalUrl?.split("?")[0] },
     "Unhandled API error",
   );
-  res.status(500).json({ error: "Internal server error" });
+  console.error("EXPRESS ERROR:", err);
+  res.status(500).json({ error: "Internal server error", stack: err.stack, msg: err.message });
 });
 
 export default app;

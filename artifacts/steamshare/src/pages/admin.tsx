@@ -2233,7 +2233,7 @@ function ReportsTab() {
                               <span>Steam User: <strong className="text-foreground font-mono">{report.accountUsername}</strong></span>
                             )}
                             {report.accountStatus && (
-                              <Badge variant="outline" className="text-[10px] uppercase">
+                              <Badge variant="outline" className={`text-[10px] uppercase ${report.accountStatus === 'approved' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : ''}`}>
                                 Status: {report.accountStatus}
                               </Badge>
                             )}
@@ -2244,6 +2244,26 @@ function ReportsTab() {
                             )}
                           </div>
                         </div>
+
+                        {report.accountTitle && (
+                          <div className="pt-2 border-t border-border/60">
+                            <span className="text-muted-foreground">Title: </span>
+                            <span className="font-semibold text-foreground">{report.accountTitle}</span>
+                          </div>
+                        )}
+
+                        {report.accountGames && report.accountGames.length > 0 && (
+                          <div className="pt-2 border-t border-border/60">
+                            <span className="text-muted-foreground block mb-1">Games: </span>
+                            <div className="flex flex-wrap gap-1">
+                              {report.accountGames.map((game: string, i: number) => (
+                                <Badge key={i} variant="secondary" className="text-[10px] font-normal px-1.5 py-0">
+                                  {game}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Instant Check Result display */}
                         {accountCheck && (
