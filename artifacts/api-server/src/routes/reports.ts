@@ -1,9 +1,8 @@
 // @ts-nocheck
 import express from "express";
-import { db, reportsTable, usersTable } from "@workspace/db";
+import { db, reportsTable, usersTable, notificationsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireModOrAdmin } from "../middlewares/auth";
-import { sendBotMessage } from "../lib/adminBot";
 
 const router = express.Router();
 
@@ -48,11 +47,21 @@ router.patch("/:id/action", requireModOrAdmin, async (req, res) => {
     return;
   }
 
-  if (report.reporterId) {
-    await sendBotMessage(
-      report.reporterId,
-      `✅ Your report (#${report.id}) has been **reviewed and actioned** by our moderation team. Thank you for helping keep the community safe.`,
-    ).catch(() => {});
+  const [reporter] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.id, report.reporterId))
+    .limit(1);
+
+  if (reporter) {
+    await db.insert(notificationsTable).values({
+      userId: reporter.id,
+      type: "admin_update",
+      actorUsername: "Admin",
+      message: `✅ Your report (#${report.id}) has been reviewed and actioned by our moderation team. Thank you for helping keep the community safe.`,
+      linkUrl: null,
+      isRead: false,
+    });
   }
 
   res.json({ ok: true });
