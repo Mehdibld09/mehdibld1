@@ -26,7 +26,8 @@ async function fetchDashboard() {
   const res = await fetch("/api/admin/dashboard", { credentials: "include" });
   if (!res.ok) throw new Error("Failed");
   return res.json() as Promise<{
-    users: { total: number; new24h: number; new7d: number; new30d: number; banned: number; premium: number; vip: number };
+    users: { total: number; new24h: number; new7d: number; new30d: number; banned: number };
+    premium: { active: number; premium: number; pro: number };
     accounts: { total: number; new24h: number; new7d: number; removed: number; pending: number };
     reports: { total: number; open: number };
     activity: { totalClaims: number; pointsCirculating: number };
@@ -85,8 +86,9 @@ function DashboardTab() {
       <section>
         <h3 className="text-base font-bold mb-4 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-400" /> Membership</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <StatCard icon={<Star className="h-5 w-5" />} label="Premium Users" value={data.users.premium} sub="Active Premium memberships" color="text-yellow-400" />
-          <StatCard icon={<Zap className="h-5 w-5" />} label="VIP / Pro Users" value={data.users.vip} sub="Active VIP/Pro memberships" color="text-blue-400" />
+          <StatCard icon={<Star className="h-5 w-5" />} label="Active Premium/VIP users" value={data.premium.active} sub="Currently subscribed" color="text-yellow-400" />
+          <StatCard icon={<Star className="h-5 w-5" />} label="Premium" value={data.premium.premium} sub="Active Premium tier" color="text-yellow-400" />
+          <StatCard icon={<Zap className="h-5 w-5" />} label="Pro" value={data.premium.pro} sub="Active Pro tier" color="text-blue-400" />
         </div>
       </section>
 

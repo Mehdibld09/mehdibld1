@@ -1,7 +1,7 @@
 // @ts-nocheck
 import express from "express";
 import { db, usersTable, accountsTable, reportsTable, commentsTable, ipBansTable, accountClaimsTable } from "@workspace/db";
-import { eq, desc, sql, and, inArray, isNotNull, or } from "drizzle-orm";
+import { eq, desc, sql, and, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { requireAdmin, requireModOrAdmin } from "../middlewares/auth";
 import { sendBotMessage } from "../lib/adminBot";
 import { getSetting } from "../lib/settings";
@@ -477,6 +477,9 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
     [{ total: openReports }],
     [{ total: totalClaims }],
     [{ total: totalPoints }],
+    [{ total: activePremiumUsers }],
+    [{ total: premiumUsers }],
+    [{ total: proUsers }],
   ] = await Promise.all([
     db.select({ total: sql<number>`count(*)` }).from(usersTable),
     db.select({ total: sql<number>`count(*)` }).from(usersTable).where(sql`${usersTable.createdAt} >= ${ago24h}`),
@@ -492,6 +495,9 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
     db.select({ total: sql<number>`count(*)` }).from(reportsTable).where(eq(reportsTable.isDismissed, false)),
     db.select({ total: sql<number>`coalesce(sum(${accountsTable.claimsCount}), 0)` }).from(accountsTable),
     db.select({ total: sql<number>`coalesce(sum(${usersTable.points}), 0)` }).from(usersTable),
+    db.select({ total: sql<number>`count(*)` }).from(usersTable).where(and(isNotNull(usersTable.premiumTier), or(isNull(usersTable.premiumExpiresAt), sql`${usersTable.premiumExpiresAt} > NOW()`))),
+    db.select({ total: sql<number>`count(*)` }).from(usersTable).where(and(eq(usersTable.premiumTier, "premium"), or(isNull(usersTable.premiumExpiresAt), sql`${usersTable.premiumExpiresAt} > NOW()`))),
+    db.select({ total: sql<number>`count(*)` }).from(usersTable).where(and(eq(usersTable.premiumTier, "pro"), or(isNull(usersTable.premiumExpiresAt), sql`${usersTable.premiumExpiresAt} > NOW()`))),
   ]);
 
   // Admin-only: private so CDN won't cache it publicly, but allows browser to cache briefly
@@ -503,6 +509,11 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
       new7d: Number(newUsers7d),
       new30d: Number(newUsers30d),
       banned: Number(bannedUsers),
+    },
+    premium: {
+      active: Number(activePremiumUsers),
+      premium: Number(premiumUsers),
+      pro: Number(proUsers),
     },
     accounts: {
       total: Number(totalAccounts),
