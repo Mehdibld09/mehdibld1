@@ -1,6 +1,6 @@
 // @ts-nocheck
 import express from "express";
-import { db, usersTable, accountsTable, reportsTable, commentsTable, ipBansTable, accountClaimsTable, messagesTable } from "@workspace/db";
+import { db, usersTable, accountsTable, reportsTable, commentsTable, ipBansTable, accountClaimsTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, isNotNull, or } from "drizzle-orm";
 import { requireAdmin, requireModOrAdmin } from "../middlewares/auth";
 import { sendBotMessage } from "../lib/adminBot";
@@ -20,8 +20,10 @@ const router = express.Router();
 
 // --- Users ---
 router.get("/users", requireModOrAdmin, async (req, res) => {
+  const page = parseInt(String(req.query.page ?? "1"), 10);
   const search = String(req.query.search ?? "").trim();
-  const searchLike = `%${search.toLowerCase()}%`;
+  const limit = search ? 20 : 50;
+  const offset = search ? 0 : (page - 1) * limit;
 
   const users = await db
     .select({
@@ -47,94 +49,22 @@ router.get("/users", requireModOrAdmin, async (req, res) => {
       premiumExpiresAt: usersTable.premiumExpiresAt,
     })
     .from(usersTable)
-    .where(search ? sql`(
-      LOWER(${usersTable.username}) LIKE ${searchLike}
-      OR LOWER(${usersTable.displayName}) LIKE ${searchLike}
-      OR LOWER(${usersTable.email}) LIKE ${searchLike}
-    )` : undefined)
+    .where(search ? sql`LOWER(${usersTable.username}) LIKE ${"%" + search.toLowerCase() + "%"}` : undefined)
     .orderBy(desc(usersTable.createdAt))
-    .limit(50);
+    .limit(limit)
+    .offset(offset);
 
   res.json(users);
-});
-
-// --- Admin account search ---
-// Deliberately capped at 50 rows so the console always queries a bounded result set.
-router.get("/accounts", requireAdmin, async (req, res) => {
-  const search = String(req.query.search ?? "").trim();
-  const searchLike = `%${search.toLowerCase()}%`;
-  const conditions = [sql`${accountsTable.deletedAt} IS NULL`];
-
-  if (search) {
-    conditions.push(sql`(
-      LOWER(${accountsTable.title}) LIKE ${searchLike}
-      OR LOWER(COALESCE(${accountsTable.description}, '')) LIKE ${searchLike}
-      OR LOWER(${accountsTable.steamUsername}) LIKE ${searchLike}
-      OR LOWER(COALESCE(${usersTable.username}, '')) LIKE ${searchLike}
-    )`);
-  }
-
-  const accounts = await db
-    .select({
-      id: accountsTable.id,
-      userId: accountsTable.userId,
-      title: accountsTable.title,
-      description: accountsTable.description,
-      pointsCost: accountsTable.pointsCost,
-      isAvailable: accountsTable.isAvailable,
-      status: accountsTable.status,
-      createdAt: accountsTable.createdAt,
-      posterUsername: usersTable.username,
-    })
-    .from(accountsTable)
-    .leftJoin(usersTable, eq(accountsTable.userId, usersTable.id))
-    .where(and(...conditions))
-    .orderBy(desc(accountsTable.createdAt))
-    .limit(50);
-
-  res.json({ accounts, limit: 50 });
-});
-
-// --- Premium/VIP users ---
-// `pro` is the existing database tier used for the product's VIP membership.
-router.get("/premium-users", requireAdmin, async (req, res) => {
-  const search = String(req.query.search ?? "").trim();
-  const searchLike = `%${search.toLowerCase()}%`;
-  const conditions = [
-    sql`${usersTable.premiumTier} IN ('premium', 'pro')`,
-    sql`${usersTable.premiumExpiresAt} > NOW()`,
-  ];
-
-  if (search) {
-    conditions.push(sql`(
-      LOWER(${usersTable.username}) LIKE ${searchLike}
-      OR LOWER(COALESCE(${usersTable.displayName}, '')) LIKE ${searchLike}
-      OR LOWER(${usersTable.email}) LIKE ${searchLike}
-    )`);
-  }
-
-  const users = await db
-    .select({
-      id: usersTable.id,
-      username: usersTable.username,
-      displayName: usersTable.displayName,
-      email: usersTable.email,
-      premiumTier: usersTable.premiumTier,
-      premiumExpiresAt: usersTable.premiumExpiresAt,
-      isBanned: usersTable.isBanned,
-    })
-    .from(usersTable)
-    .where(and(...conditions))
-    .orderBy(desc(usersTable.premiumExpiresAt))
-    .limit(50);
-
-  res.json({ users, limit: 50 });
 });
 
 // Timed ban with reason — POST body: { durationHours?: number, reason?: string }
 router.post("/users/:userId/ban", requireModOrAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   const { durationHours, reason } = req.body as { durationHours?: number; reason?: string };
+  if (durationHours !== undefined && (typeof durationHours !== "number" || durationHours <= 0)) {
+    res.status(400).json({ error: "durationHours must be a positive number" });
+    return;
+  }
 
   // Moderators cannot ban other moderators or admins
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
@@ -244,41 +174,6 @@ router.post("/users/:userId/points", requireAdmin, async (req, res) => {
   res.json({ message: `Points adjusted by ${delta}` });
 });
 
-// Message user directly or via Admin Bot
-router.post("/users/:userId/message", requireModOrAdmin, async (req, res) => {
-  const userId = parseInt(req.params.userId, 10);
-  const { content, sendAsBot } = req.body as { content: string; sendAsBot?: boolean };
-
-  if (!content || !content.trim()) {
-    res.status(400).json({ error: "Message content cannot be empty" });
-    return;
-  }
-
-  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-  if (!target) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  if (sendAsBot) {
-    await sendBotMessage(userId, content.trim());
-    res.json({ ok: true, message: "Bot notification sent successfully" });
-  } else {
-    const senderId = req.session.userId!;
-    if (senderId === userId) {
-      res.status(400).json({ error: "Cannot message yourself" });
-      return;
-    }
-    const [msg] = await db.insert(messagesTable).values({
-      senderId,
-      receiverId: userId,
-      content: content.trim(),
-      isRead: false,
-    }).returning();
-    res.json({ ok: true, message: "Direct message sent successfully", data: msg });
-  }
-});
-
 // --- Pending Account Reviews ---
 router.get("/pending-accounts", requireModOrAdmin, async (req, res) => {
   const accounts = await db
@@ -306,7 +201,7 @@ router.get("/pending-accounts", requireModOrAdmin, async (req, res) => {
 
 router.post("/accounts/:accountId/approve", requireModOrAdmin, async (req, res) => {
   const accountId = parseInt(req.params.accountId, 10);
-  const { games, pointsCost } = req.body as { games?: string[]; pointsCost?: number };
+  const { games } = req.body as { games?: string[] };
 
   const [account] = await db
     .select({ id: accountsTable.id, userId: accountsTable.userId, status: accountsTable.status, title: accountsTable.title })
@@ -325,7 +220,6 @@ router.post("/accounts/:accountId/approve", requireModOrAdmin, async (req, res) 
 
   const updates: Record<string, unknown> = { status: "approved", isAvailable: true, reviewNote: null };
   if (games && Array.isArray(games)) updates.games = games;
-  if (typeof pointsCost === "number" && pointsCost >= 0) updates.pointsCost = pointsCost;
 
   await db.update(accountsTable).set(updates).where(eq(accountsTable.id, accountId));
   const [xpUpload, ptsUpload] = await Promise.all([
@@ -345,31 +239,6 @@ router.post("/accounts/:accountId/approve", requireModOrAdmin, async (req, res) 
   ).catch(() => {});
 
   res.json({ message: "Account approved and published" });
-});
-
-// Update games or price of an account under review
-router.patch("/accounts/:accountId/review-edit", requireModOrAdmin, async (req, res) => {
-  const accountId = parseInt(req.params.accountId, 10);
-  const { games, pointsCost, title, description } = req.body as {
-    games?: string[];
-    pointsCost?: number;
-    title?: string;
-    description?: string;
-  };
-
-  const updates: Record<string, unknown> = {};
-  if (games && Array.isArray(games)) updates.games = games;
-  if (typeof pointsCost === "number" && pointsCost >= 0) updates.pointsCost = pointsCost;
-  if (title && typeof title === "string") updates.title = title.trim();
-  if (description !== undefined) updates.description = description;
-
-  if (Object.keys(updates).length === 0) {
-    res.status(400).json({ error: "No valid fields to update" });
-    return;
-  }
-
-  await db.update(accountsTable).set(updates).where(eq(accountsTable.id, accountId));
-  res.json({ message: "Account details updated" });
 });
 
 router.post("/accounts/:accountId/reject", requireModOrAdmin, async (req, res) => {
@@ -401,6 +270,28 @@ router.post("/accounts/:accountId/reject", requireModOrAdmin, async (req, res) =
 });
 
 // --- Reports ---
+// Action a report and notify its reporter.
+router.patch("/reports/:reportId/action", requireModOrAdmin, async (req, res) => {
+  const reportId = parseInt(req.params.reportId, 10);
+  const [report] = await db
+    .update(reportsTable)
+    .set({ isActioned: true, isDismissed: true })
+    .where(eq(reportsTable.id, reportId))
+    .returning();
+
+  if (!report) {
+    res.status(404).json({ error: "Report not found" });
+    return;
+  }
+
+  await sendBotMessage(
+    report.reporterId,
+    `Your report (#${report.id}) has been reviewed and actioned by our moderation team. Thank you for helping keep the community safe.`,
+  );
+
+  res.json({ ok: true });
+});
+
 router.get("/reports", requireModOrAdmin, async (req, res) => {
   const reports = await db
     .select({
@@ -446,140 +337,14 @@ router.get("/reports", requireModOrAdmin, async (req, res) => {
     }
   }
 
-  // Enrich account reports with account status, credentials check info, and purchase/claim points
-  const accountTargetIds = reports
-    .filter((r) => r.targetType === "account")
-    .map((r) => r.targetId);
-
-  let accountMap: Record<number, { title: string; pointsCost: number; isAvailable: boolean; status: string; lastCheckedAt: Date | null; lastCheckStatus: string | null; steamUsername?: string }> = {};
-  let claimsMap: Record<string, { pointsSpent: number }> = {};
-
-  if (accountTargetIds.length > 0) {
-    const accounts = await db
-      .select({
-        id: accountsTable.id,
-        title: accountsTable.title,
-        pointsCost: accountsTable.pointsCost,
-        isAvailable: accountsTable.isAvailable,
-        status: accountsTable.status,
-        lastCheckedAt: accountsTable.lastCheckedAt,
-        lastCheckStatus: accountsTable.lastCheckStatus,
-        steamUsername: accountsTable.steamUsername,
-      })
-      .from(accountsTable)
-      .where(inArray(accountsTable.id, accountTargetIds));
-
-    for (const a of accounts) {
-      accountMap[a.id] = a;
-    }
-
-    // Check claims by reporters
-    const claims = await db
-      .select({
-        userId: accountClaimsTable.userId,
-        accountId: accountClaimsTable.accountId,
-        pointsSpent: accountClaimsTable.pointsSpent,
-      })
-      .from(accountClaimsTable)
-      .where(inArray(accountClaimsTable.accountId, accountTargetIds));
-
-    for (const c of claims) {
-      claimsMap[`${c.userId}_${c.accountId}`] = { pointsSpent: c.pointsSpent };
-    }
-  }
-
-  const enriched = reports.map((r) => {
-    const claim = r.targetType === "account" ? claimsMap[`${r.reporterId}_${r.targetId}`] : undefined;
-    const acc = r.targetType === "account" ? accountMap[r.targetId] : undefined;
-    return {
-      ...r,
-      commentContent: r.targetType === "comment" ? (commentMap[r.targetId]?.content ?? null) : null,
-      commentAuthorId: r.targetType === "comment" ? (commentMap[r.targetId]?.authorId ?? null) : null,
-      commentAuthorUsername: r.targetType === "comment" ? (commentMap[r.targetId]?.authorUsername ?? null) : null,
-      accountTitle: acc?.title ?? null,
-      accountPointsCost: acc?.pointsCost ?? null,
-      accountIsAvailable: acc?.isAvailable ?? null,
-      accountStatus: acc?.status ?? null,
-      accountLastCheckedAt: acc?.lastCheckedAt ?? null,
-      accountLastCheckStatus: acc?.lastCheckStatus ?? null,
-      accountSteamUsername: acc?.steamUsername ?? null,
-      claimedPoints: claim ? claim.pointsSpent : (acc?.pointsCost ?? null),
-      hasClaimed: !!claim,
-    };
-  });
+  const enriched = reports.map((r) => ({
+    ...r,
+    commentContent: r.targetType === "comment" ? (commentMap[r.targetId]?.content ?? null) : null,
+    commentAuthorId: r.targetType === "comment" ? (commentMap[r.targetId]?.authorId ?? null) : null,
+    commentAuthorUsername: r.targetType === "comment" ? (commentMap[r.targetId]?.authorUsername ?? null) : null,
+  }));
 
   res.json(enriched);
-});
-
-// Action report and notify user via Admin Bot
-router.patch("/reports/:reportId/action", requireModOrAdmin, async (req, res) => {
-  const reportId = parseInt(req.params.reportId, 10);
-  const [report] = await db
-    .update(reportsTable)
-    .set({ isActioned: true, isDismissed: true })
-    .where(eq(reportsTable.id, reportId))
-    .returning();
-
-  if (!report) {
-    res.status(404).json({ error: "Report not found" });
-    return;
-  }
-
-  if (report.reporterId) {
-    await sendBotMessage(
-      report.reporterId,
-      `✅ Your report (#${report.id}) has been **reviewed and actioned** by our moderation team. Thank you for helping keep the community safe.`,
-    ).catch(() => {});
-  }
-
-  res.json({ ok: true });
-});
-
-// Refund user for a reported non-working account
-router.post("/reports/:reportId/refund", requireModOrAdmin, async (req, res) => {
-  const reportId = parseInt(req.params.reportId, 10);
-  const [report] = await db.select().from(reportsTable).where(eq(reportsTable.id, reportId)).limit(1);
-
-  if (!report) {
-    res.status(404).json({ error: "Report not found" });
-    return;
-  }
-
-  if (report.targetType !== "account") {
-    res.status(400).json({ error: "Refunds can only be processed for account reports" });
-    return;
-  }
-
-  const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, report.targetId)).limit(1);
-  const [claim] = await db
-    .select()
-    .from(accountClaimsTable)
-    .where(and(eq(accountClaimsTable.userId, report.reporterId), eq(accountClaimsTable.accountId, report.targetId)))
-    .limit(1);
-
-  const customAmount = req.body?.amount ? Number(req.body.amount) : null;
-  const refundAmount = customAmount ?? (claim?.pointsSpent || account?.pointsCost || 0);
-
-  if (refundAmount > 0) {
-    await db.update(usersTable)
-      .set({ points: sql`${usersTable.points} + ${refundAmount}` })
-      .where(eq(usersTable.id, report.reporterId));
-  }
-
-  // Mark report as actioned
-  await db.update(reportsTable)
-    .set({ isActioned: true, isDismissed: true })
-    .where(eq(reportsTable.id, reportId));
-
-  // Send refund message directly via Admin Bot
-  const customMessage = req.body?.message?.trim();
-  const botMessageText = customMessage || `Report approved and ${refundAmount} points refunded`;
-  await sendBotMessage(
-    report.reporterId,
-    botMessageText,
-  ).catch(() => {});
-
-  res.json({ ok: true, amount: refundAmount, message: `Refund of ${refundAmount} points issued successfully` });
 });
 
 router.patch("/reports/:reportId/dismiss", requireModOrAdmin, async (req, res) => {
@@ -593,6 +358,67 @@ router.delete("/comments/:commentId", requireModOrAdmin, async (req, res) => {
   const commentId = parseInt(req.params.commentId, 10);
   await db.delete(commentsTable).where(eq(commentsTable.id, commentId));
   res.json({ ok: true });
+});
+
+// Refund points for a reported non-working account.
+router.post("/reports/:reportId/refund", requireModOrAdmin, async (req, res) => {
+  const reportId = parseInt(req.params.reportId, 10);
+  const [report] = await db
+    .select()
+    .from(reportsTable)
+    .where(eq(reportsTable.id, reportId))
+    .limit(1);
+
+  if (!report) {
+    res.status(404).json({ error: "Report not found" });
+    return;
+  }
+  if (report.targetType !== "account") {
+    res.status(400).json({ error: "Refunds can only be processed for account reports" });
+    return;
+  }
+
+  const [account] = await db
+    .select()
+    .from(accountsTable)
+    .where(eq(accountsTable.id, report.targetId))
+    .limit(1);
+  const [claim] = await db
+    .select()
+    .from(accountClaimsTable)
+    .where(
+      and(
+        eq(accountClaimsTable.userId, report.reporterId),
+        eq(accountClaimsTable.accountId, report.targetId),
+      ),
+    )
+    .limit(1);
+
+  const customAmount = req.body?.amount ? Number(req.body.amount) : null;
+  const refundAmount = customAmount ?? (claim?.pointsSpent || account?.pointsCost || 0);
+
+  if (refundAmount > 0) {
+    await db
+      .update(usersTable)
+      .set({ points: sql`${usersTable.points} + ${refundAmount}` })
+      .where(eq(usersTable.id, report.reporterId));
+  }
+
+  await db
+    .update(reportsTable)
+    .set({ isActioned: true, isDismissed: true })
+    .where(eq(reportsTable.id, reportId));
+
+  const customMessage = req.body?.message?.trim();
+  const refundMessage =
+    customMessage || `Report approved and ${refundAmount} points refunded`;
+  await sendBotMessage(report.reporterId, refundMessage);
+
+  res.json({
+    ok: true,
+    amount: refundAmount,
+    message: `Refund of ${refundAmount} points issued successfully`,
+  });
 });
 
 // Admin Dashboard stats
@@ -617,8 +443,6 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
     [{ total: openReports }],
     [{ total: totalClaims }],
     [{ total: totalPoints }],
-    [{ total: premiumUsers }],
-    [{ total: vipUsers }],
   ] = await Promise.all([
     db.select({ total: sql<number>`count(*)` }).from(usersTable),
     db.select({ total: sql<number>`count(*)` }).from(usersTable).where(sql`${usersTable.createdAt} >= ${ago24h}`),
@@ -634,14 +458,6 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
     db.select({ total: sql<number>`count(*)` }).from(reportsTable).where(eq(reportsTable.isDismissed, false)),
     db.select({ total: sql<number>`coalesce(sum(${accountsTable.claimsCount}), 0)` }).from(accountsTable),
     db.select({ total: sql<number>`coalesce(sum(${usersTable.points}), 0)` }).from(usersTable),
-    db.select({ total: sql<number>`count(*)` }).from(usersTable).where(and(
-      eq(usersTable.premiumTier, "premium"),
-      sql`${usersTable.premiumExpiresAt} > NOW()`,
-    )),
-    db.select({ total: sql<number>`count(*)` }).from(usersTable).where(and(
-      eq(usersTable.premiumTier, "pro"),
-      sql`${usersTable.premiumExpiresAt} > NOW()`,
-    )),
   ]);
 
   // Admin-only: private so CDN won't cache it publicly, but allows browser to cache briefly
@@ -653,8 +469,6 @@ router.get("/dashboard", requireAdmin, async (_req, res) => {
       new7d: Number(newUsers7d),
       new30d: Number(newUsers30d),
       banned: Number(bannedUsers),
-      premium: Number(premiumUsers),
-      vip: Number(vipUsers),
     },
     accounts: {
       total: Number(totalAccounts),
