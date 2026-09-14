@@ -2040,13 +2040,13 @@ function ReportsTab() {
       toast({ title: "Check failed", description: "No valid account ID associated with this report.", variant: "destructive" });
       return;
     }
-    setCheckStates((p) => ({ ...p, [reportId]: { loading: true } }));
+    setCheckStates((p) => ({ ...p, [accountId]: { loading: true } }));
     try {
       const res = await fetch(`/api/accounts/${accountId}/check`, { method: "POST", credentials: "include" });
       const data = await res.json();
       setCheckStates((p) => ({
         ...p,
-        [reportId]: {
+        [accountId]: {
           loading: false,
           status: data.status,
           message: data.message,
@@ -2064,7 +2064,7 @@ function ReportsTab() {
         toast({ title: "Check Result", description: data.message || data.status });
       }
     } catch (e: any) {
-      setCheckStates((p) => ({ ...p, [reportId]: { loading: false, status: "error", message: e.message } }));
+      setCheckStates((p) => ({ ...p, [accountId]: { loading: false, status: "error", message: e.message } }));
       toast({ title: "Check failed", description: e.message, variant: "destructive" });
     }
   }
@@ -2180,7 +2180,7 @@ function ReportsTab() {
         <div className="space-y-3">
           {filtered.map((report: any) => {
             const isAccount = report.targetType === "account" && Boolean(report.targetId);
-            const accountCheck = isAccount ? checkStates[report.id] : null;
+            const accountCheck = isAccount ? checkStates[report.targetId] : null;
             const refundPointsValue = report.claimedPoints ?? report.accountCost ?? 0;
 
             return (
