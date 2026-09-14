@@ -455,6 +455,30 @@ router.post("/reports/:reportId/refund", requireModOrAdmin, async (req, res) => 
   });
 });
 
+// Admin Premium Users
+router.get("/premium-users", requireAdmin, async (req, res) => {
+  const users = await db
+    .select({
+      id: usersTable.id,
+      username: usersTable.username,
+      premiumTier: usersTable.premiumTier,
+      premiumExpiresAt: usersTable.premiumExpiresAt,
+    })
+    .from(usersTable)
+    .where(
+      and(
+        isNotNull(usersTable.premiumTier),
+        or(
+          isNull(usersTable.premiumExpiresAt),
+          sql`${usersTable.premiumExpiresAt} > NOW()`
+        )
+      )
+    )
+    .orderBy(desc(usersTable.premiumTier), desc(usersTable.createdAt));
+
+  res.json({ users, limit: users.length });
+});
+
 // Admin Dashboard stats
 router.get("/dashboard", requireAdmin, async (_req, res) => {
   const now = new Date();

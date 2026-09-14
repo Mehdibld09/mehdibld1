@@ -4208,6 +4208,74 @@ function PremiumAdminTab() {
   return (
     <div className="space-y-6">
 
+      {/* Code Generator */}
+      <div className="bg-card border border-primary/20 rounded-xl p-6 space-y-5">
+        <h3 className="font-bold text-foreground text-base flex items-center gap-2">
+          <Gift className="h-5 w-5 text-primary" /> Redeem Code Generator
+        </h3>
+        <p className="text-sm text-muted-foreground">Generate single-use or multi-use codes to gift premium access to users.</p>
+
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Tier</p>
+            <div className="flex gap-2">
+              <button onClick={() => setCodeGenTier("premium")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "premium" ? "border-yellow-500 bg-yellow-500/10 text-yellow-400" : "border-border text-muted-foreground hover:text-foreground"}`}>⭐ Premium</button>
+              <button onClick={() => setCodeGenTier("pro")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "pro" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-border text-muted-foreground hover:text-foreground"}`}>💎 Pro</button>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Duration (days)</p>
+            <div className="flex gap-2 items-center">
+              <Input type="number" min={1} max={365} value={codeGenDays} onChange={(e) => setCodeGenDays(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
+              <Button variant="outline" size="sm" onClick={() => setCodeGenDays(30)} className="h-9 px-2 text-xs">30d</Button>
+              <Button variant="outline" size="sm" onClick={() => setCodeGenDays(365)} className="h-9 px-2 text-xs border-primary/50 text-primary hover:bg-primary/10">1 Year</Button>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Max uses</p>
+            <Input type="number" min={1} max={1000} value={codeGenMaxUses} onChange={(e) => setCodeGenMaxUses(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
+          </div>
+          <Button onClick={() => generateCodeMutation.mutate()} disabled={generateCodeMutation.isPending} className="bg-primary hover:bg-primary/90 h-9">
+            {generateCodeMutation.isPending ? "Generating..." : "Generate Code"}
+          </Button>
+        </div>
+
+        {generatedCode && (
+          <div className="bg-primary/10 border border-primary/30 rounded-lg px-4 py-3 flex items-center gap-3">
+            <code className="font-mono text-primary font-bold text-lg tracking-widest flex-1">{generatedCode}</code>
+            <button
+              onClick={() => { navigator.clipboard.writeText(generatedCode); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
+              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              title="Copy code"
+            >
+              {copiedCode ? <CheckCheck className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+            </button>
+          </div>
+        )}
+
+        {/* Codes list */}
+        {(codes as any[]).length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Codes</p>
+            <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border max-h-56 overflow-y-auto">
+              {(codes as any[]).map((c: any) => (
+                <div key={c.id} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${!c.is_active ? "opacity-40" : ""}`}>
+                  <code className="font-mono font-bold text-primary flex-1 text-xs">{c.code}</code>
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${c.tier === "pro" ? "bg-blue-500/20 text-blue-400" : "bg-yellow-500/20 text-yellow-400"}`}>{c.tier}</span>
+                  <span className="text-xs text-muted-foreground">{c.days}d</span>
+                  <span className="text-xs text-muted-foreground">{c.uses_count}/{c.max_uses}</span>
+                  {c.is_active && (
+                    <button onClick={() => deactivateCodeMutation.mutate(c.id)} className="text-destructive hover:text-destructive/80 transition-colors ml-1" title="Deactivate">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Active Premium Users */}
       <div className="bg-card border border-yellow-500/20 rounded-xl p-6 space-y-4">
         <h3 className="font-bold text-foreground text-base flex items-center gap-2">
@@ -4428,70 +4496,6 @@ function PremiumAdminTab() {
         <Button className="w-full mt-5 bg-yellow-500 hover:bg-yellow-600 text-black font-bold" onClick={() => savePremiumPricingMutation.mutate()} disabled={savePremiumPricingMutation.isPending}>
           {savePremiumPricingMutation.isPending ? "Saving..." : "Save Pricing"}
         </Button>
-      </div>
-
-      {/* Code Generator */}
-      <div className="bg-card border border-primary/20 rounded-xl p-6 space-y-5">
-        <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-          <Gift className="h-5 w-5 text-primary" /> Redeem Code Generator
-        </h3>
-        <p className="text-sm text-muted-foreground">Generate single-use or multi-use codes to gift premium access to users.</p>
-
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Tier</p>
-            <div className="flex gap-2">
-              <button onClick={() => setCodeGenTier("premium")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "premium" ? "border-yellow-500 bg-yellow-500/10 text-yellow-400" : "border-border text-muted-foreground hover:text-foreground"}`}>⭐ Premium</button>
-              <button onClick={() => setCodeGenTier("pro")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "pro" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-border text-muted-foreground hover:text-foreground"}`}>💎 Pro</button>
-            </div>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Duration (days)</p>
-            <Input type="number" min={1} max={365} value={codeGenDays} onChange={(e) => setCodeGenDays(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Max uses</p>
-            <Input type="number" min={1} max={1000} value={codeGenMaxUses} onChange={(e) => setCodeGenMaxUses(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
-          </div>
-          <Button onClick={() => generateCodeMutation.mutate()} disabled={generateCodeMutation.isPending} className="bg-primary hover:bg-primary/90">
-            {generateCodeMutation.isPending ? "Generating..." : "Generate Code"}
-          </Button>
-        </div>
-
-        {generatedCode && (
-          <div className="bg-primary/10 border border-primary/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <code className="font-mono text-primary font-bold text-lg tracking-widest flex-1">{generatedCode}</code>
-            <button
-              onClick={() => { navigator.clipboard.writeText(generatedCode); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
-              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              title="Copy code"
-            >
-              {copiedCode ? <CheckCheck className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
-            </button>
-          </div>
-        )}
-
-        {/* Codes list */}
-        {(codes as any[]).length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Codes</p>
-            <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border max-h-56 overflow-y-auto">
-              {(codes as any[]).map((c: any) => (
-                <div key={c.id} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${!c.is_active ? "opacity-40" : ""}`}>
-                  <code className="font-mono font-bold text-primary flex-1 text-xs">{c.code}</code>
-                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${c.tier === "pro" ? "bg-blue-500/20 text-blue-400" : "bg-yellow-500/20 text-yellow-400"}`}>{c.tier}</span>
-                  <span className="text-xs text-muted-foreground">{c.days}d</span>
-                  <span className="text-xs text-muted-foreground">{c.uses_count}/{c.max_uses}</span>
-                  {c.is_active && (
-                    <button onClick={() => deactivateCodeMutation.mutate(c.id)} className="text-destructive hover:text-destructive/80 transition-colors ml-1" title="Deactivate">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
