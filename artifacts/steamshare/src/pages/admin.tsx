@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Fragment, useState, useEffect, type ReactNode } from "react";
-import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles } from "lucide-react";
+import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles, Terminal } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownEditor } from "@/components/markdown-editor";
 
@@ -3756,6 +3756,28 @@ function SmtpSettingsSection() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; details?: any } | null>(null);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+
+  // Load latest test status if available
+  useQuery({
+    queryKey: ["admin-smtp-test-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/site-settings/smtp/test-status", { credentials: "include" });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.lastResult && !testResult) {
+        setTestResult({
+          success: data.lastResult.success,
+          message: data.lastResult.success ? "Test email sent successfully" : "Test failed",
+          details: data.lastResult,
+        });
+      }
+      return data;
+    },
+    enabled: !!smtpData?.configured,
+  });
+
   const testMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/site-settings/smtp/test", {
@@ -3765,11 +3787,34 @@ function SmtpSettingsSection() {
         body: JSON.stringify({ to: testEmail.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to send test email.");
+      if (!res.ok) {
+        setTestResult({
+          success: false,
+          error: data.error || "Failed to send test email.",
+          details: data.details,
+        });
+        throw new Error(data.error || "Failed to send test email.");
+      }
+      setTestResult({
+        success: true,
+        message: data.message || "Test email sent successfully!",
+        details: data.details,
+      });
       return data;
     },
-    onSuccess: () => toast({ title: "Test email sent!", description: `Check ${testEmail} — if it arrived, SMTP is working.` }),
-    onError: (e: any) => toast({ title: "Test failed", description: e.message, variant: "destructive" }),
+    onSuccess: (data) => {
+      toast({
+        title: "Test email delivered!",
+        description: `SMTP accepted message for ${testEmail.trim()} (${data?.details?.durationMs ? `${data.details.durationMs}ms` : 'OK'}).`,
+      });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "SMTP test failed",
+        description: e.message,
+        variant: "destructive",
+      });
+    },
   });
 
   return (
@@ -3854,14 +3899,18 @@ function SmtpSettingsSection() {
           {saveMutation.isPending ? "Saving..." : "Save SMTP Settings"}
         </Button>
 
-        {/* Test email */}
+        {/* Test email & Diagnostic Console */}
         {smtpData?.configured && (
-          <div className="pt-3 border-t border-border space-y-2">
-            <label className="text-xs font-medium text-foreground block">Send a test email</label>
-            <p className="text-xs text-muted-foreground">Enter any email address and click Send — you'll see the exact result or error if something is wrong.</p>
+          <div className="pt-4 border-t border-border space-y-3">
+            <div>
+              <label className="text-xs font-medium text-foreground block mb-0.5">Send a test email & live diagnostic</label>
+              <p className="text-xs text-muted-foreground">
+                Enter an email address to test. The console below captures the handshake, response codes, and Message-ID proving delivery or diagnosing errors.
+              </p>
+            </div>
             <div className="flex gap-2">
               <Input
-                placeholder="test@gmail.com"
+                placeholder="youremail@gmail.com"
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 type="email"
@@ -3872,10 +3921,138 @@ function SmtpSettingsSection() {
                 variant="outline"
                 onClick={() => testMutation.mutate()}
                 disabled={!testEmail.includes("@") || testMutation.isPending}
+                className="flex items-center gap-1.5"
               >
-                {testMutation.isPending ? "Sending…" : "Send Test"}
+                {testMutation.isPending ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    <span>Send Test</span>
+                  </>
+                )}
               </Button>
             </div>
+
+            {/* Test result proof & live console */}
+            {testResult && (
+              <div className="mt-3 space-y-3 animate-in fade-in duration-200">
+                {/* Proof summary card */}
+                {testResult.success ? (
+                  <div className="p-3.5 rounded-lg border border-emerald-500/40 bg-emerald-950/30 text-emerald-300">
+                    <div className="flex items-start gap-2.5">
+                      <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-sm text-emerald-200">
+                            Email Successfully Delivered & Accepted by SMTP Server!
+                          </p>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 shrink-0 font-medium">
+                            250 OK
+                          </span>
+                        </div>
+                        <p className="text-xs text-emerald-300/80">
+                          The recipient mail server accepted your test email for delivery to <strong className="text-emerald-100">{testEmail || (testResult.details?.accepted || []).join(', ')}</strong>.
+                        </p>
+                        {testResult.details && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-emerald-500/20 text-[11px] font-mono text-zinc-300">
+                            <div>
+                              <span className="text-zinc-500">Message-ID:</span>{" "}
+                              <span className="text-emerald-300 break-all">{testResult.details.messageId || "Assigned by server"}</span>
+                            </div>
+                            <div>
+                              <span className="text-zinc-500">Duration:</span>{" "}
+                              <span className="text-emerald-300">{testResult.details.durationMs ? `${testResult.details.durationMs}ms` : "N/A"}</span>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <span className="text-zinc-500">SMTP Response:</span>{" "}
+                              <span className="text-zinc-200">{testResult.details.response || "250 2.0.0 OK"}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-lg border border-rose-500/40 bg-rose-950/30 text-rose-300">
+                    <div className="flex items-start gap-2.5">
+                      <XCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1 flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-sm text-rose-200">
+                            SMTP Delivery Failed
+                          </p>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 shrink-0 font-medium">
+                            FAILED
+                          </span>
+                        </div>
+                        <p className="text-xs text-rose-300/90 leading-relaxed font-sans">
+                          {testResult.error}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Console Log Terminal */}
+                <div className="rounded-lg border border-border bg-black/90 overflow-hidden shadow-inner">
+                  <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border text-xs">
+                    <div className="flex items-center gap-2 text-muted-foreground font-mono">
+                      <Terminal className="h-3.5 w-3.5 text-primary" />
+                      <span>SMTP Session Console & Proof Logs</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          const lines = testResult.details?.logs || [testResult.error || ""];
+                          navigator.clipboard.writeText(lines.join("\n"));
+                          setCopiedLogs(true);
+                          setTimeout(() => setCopiedLogs(false), 2000);
+                        }}
+                      >
+                        {copiedLogs ? <Check className="h-3 w-3 mr-1 text-emerald-400" /> : <Copy className="h-3 w-3 mr-1" />}
+                        {copiedLogs ? "Copied" : "Copy Logs"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                        onClick={() => setTestResult(null)}
+                      >
+                        <Trash className="h-3 w-3 mr-1" />
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="p-3 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1 select-text bg-black/95">
+                    {testResult.details?.logs && testResult.details.logs.length > 0 ? (
+                      testResult.details.logs.map((line: string, idx: number) => {
+                        let colorClass = "text-zinc-400";
+                        if (line.includes("[ERROR]") || line.includes("[FAILURE]") || line.includes("FAILED")) colorClass = "text-rose-400 font-medium";
+                        else if (line.includes("[WARN]")) colorClass = "text-amber-400";
+                        else if (line.includes("✅") || line.includes("[SUCCESS]")) colorClass = "text-emerald-400 font-semibold";
+                        else if (line.includes("Initiating") || line.includes("Target SMTP")) colorClass = "text-cyan-400";
+                        return (
+                          <div key={idx} className={`${colorClass} break-all leading-relaxed`}>
+                            {line}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-zinc-500 italic">
+                        {testResult.error ? `[ERROR] ${testResult.error}` : "No console logs available."}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

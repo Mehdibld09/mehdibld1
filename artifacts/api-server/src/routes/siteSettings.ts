@@ -261,27 +261,64 @@ router.get("/smtp", requireAdmin, async (_req, res) => {
   });
 });
 
+// GET /site-settings/smtp/test-status — admin only, get latest test result
+router.get("/smtp/test-status", requireAdmin, async (_req, res) => {
+  const { getLastSmtpResult } = await import("../lib/email");
+  res.json({ lastResult: getLastSmtpResult() });
+});
+
 // POST /site-settings/smtp/test — admin only, send a test email
 router.post("/smtp/test", requireAdmin, async (req, res) => {
   const { to } = req.body as { to: string };
   if (!to || typeof to !== "string" || !to.includes("@")) {
-    res.status(400).json({ error: "A valid recipient email address is required." });
+    res.status(400).json({
+      success: false,
+      error: "A valid recipient email address is required (must contain '@').",
+      details: {
+        success: false,
+        messageId: "",
+        response: "",
+        accepted: [],
+        rejected: [],
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+        logs: ["[ERROR] A valid recipient email address is required (must contain '@')."],
+      },
+    });
     return;
   }
   const { sendEmail } = await import("../lib/email");
   try {
-    await sendEmail(
+    const result = await sendEmail(
       to.trim(),
       "SMTP test from Steam Family",
       `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f1117;color:#e2e8f0;border-radius:12px">
         <h2 style="margin:0 0 8px;font-size:22px;color:#fff">✅ SMTP is working!</h2>
         <p style="margin:0;color:#94a3b8;font-size:14px">Your email configuration is set up correctly. 2FA codes will be delivered successfully.</p>
+        <p style="margin:16px 0 0;color:#64748b;font-size:11px">Delivered at: ${new Date().toUTCString()}</p>
       </div>`
     );
-    res.json({ message: "Test email sent successfully." });
+    res.json({
+      success: true,
+      message: "Test email sent successfully!",
+      details: result,
+    });
   } catch (err: any) {
     const rawMsg = err?.message ?? "Failed to send test email.";
-    res.status(500).json({ error: rawMsg });
+    res.status(500).json({
+      success: false,
+      error: rawMsg,
+      details: {
+        success: false,
+        messageId: "",
+        response: rawMsg,
+        accepted: [],
+        rejected: [to.trim()],
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+        logs: err?.logs ?? [`[FATAL] ${rawMsg}`],
+      },
+    });
   }
 });
 

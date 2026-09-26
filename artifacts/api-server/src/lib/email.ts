@@ -21,11 +21,41 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#039;");
 }
 
-export async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+export interface SendEmailResult {
+  success: boolean;
+  messageId: string;
+  response: string;
+  accepted: string[];
+  rejected: string[];
+  durationMs: number;
+  timestamp: string;
+  logs: string[];
+}
+
+let lastSmtpResult: SendEmailResult | null = null;
+
+export function getLastSmtpResult(): SendEmailResult | null {
+  return lastSmtpResult;
+}
+
+export async function sendEmail(to: string, subject: string, html: string): Promise<SendEmailResult> {
+  const startTime = Date.now();
+  const logs: string[] = [];
+  const log = (msg: string) => {
+    const time = new Date().toISOString().split("T")[1]?.slice(0, 8) || "";
+    logs.push(`[${time}] ${msg}`);
+  };
+
+  log(`Initiating send request to <${to}>...`);
+  log(`Subject: "${subject}"`);
+
   const cfg = await getSmtpConfig();
 
   if (!cfg.smtp_host || !cfg.smtp_user || !cfg.smtp_pass) {
-    throw new Error("SMTP is not configured. Please set it in the admin panel under Site Settings → Email (SMTP).");
+    const err = new Error("SMTP is not configured. Please set your SMTP Host, Username, and Password in the admin panel under Site Settings → Email (SMTP).");
+    log(`[ERROR] Configuration check failed: Host="${cfg.smtp_host || 'MISSING'}", User="${cfg.smtp_user || 'MISSING'}", Pass="${cfg.smtp_pass ? 'PRESENT' : 'MISSING'}"`);
+    (err as any).logs = logs;
+    throw err;
   }
 
   const port = parseInt(cfg.smtp_port, 10) || 587;
@@ -36,7 +66,12 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   let cleanPass = cfg.smtp_pass;
   if (isGmail || /^[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}$/.test(cleanPass)) {
     cleanPass = cleanPass.replace(/\s+/g, "");
+    log(`Sanitized Google App Password whitespace (16 chars)`);
   }
+
+  log(`Target SMTP server: ${cfg.smtp_host}:${port} (${port === 465 ? 'SSL direct' : 'STARTTLS'})`);
+  log(`Auth user: ${cfg.smtp_user}`);
+  log(`From header: ${cfg.smtp_from || cfg.smtp_user}`);
 
   const transporter = nodemailer.createTransport({
     host: cfg.smtp_host,
@@ -64,11 +99,36 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   // Retry once on transient network/socket drops
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      await transporter.sendMail(mailOptions);
-      return;
+      log(`Connecting to ${cfg.smtp_host}:${port} (Attempt ${attempt}/2)...`);
+      const info = await transporter.sendMail(mailOptions);
+      const durationMs = Date.now() - startTime;
+      log(`✅ Connection established and email accepted by mail server!`);
+      log(`Server response: ${info.response || '250 OK'}`);
+      log(`Message-ID: ${info.messageId || 'N/A'}`);
+      log(`Accepted recipients: ${(info.accepted || []).join(', ') || to}`);
+      if (info.rejected && info.rejected.length > 0) {
+        log(`[WARN] Rejected recipients: ${info.rejected.join(', ')}`);
+      }
+      log(`Completed in ${durationMs}ms`);
+
+      const result: SendEmailResult = {
+        success: true,
+        messageId: info.messageId || "",
+        response: info.response || "250 2.0.0 OK",
+        accepted: (info.accepted || []) as string[],
+        rejected: (info.rejected || []) as string[],
+        durationMs,
+        timestamp: new Date().toISOString(),
+        logs,
+      };
+
+      lastSmtpResult = result;
+      return result;
     } catch (err: any) {
       lastError = err;
       const errMsg = String(err?.message || err);
+      log(`[ERROR] Attempt ${attempt} failed: ${errMsg}`);
+
       const isTransient =
         errMsg.includes("ETIMEDOUT") ||
         errMsg.includes("ESOCKETTIMEDOUT") ||
@@ -77,7 +137,7 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
         errMsg.includes("greeting timeout");
 
       if (attempt === 1 && isTransient) {
-        console.warn(`[SMTP] Attempt 1 failed with transient error: ${errMsg}. Retrying in 1.5s...`);
+        log(`Transient socket drop detected. Retrying connection in 1.5 seconds...`);
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
       }
@@ -86,23 +146,22 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   }
 
   const rawMsg = lastError?.message || String(lastError);
+  let userFriendlyMsg = `SMTP Error: ${rawMsg}`;
+
   if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("badcredentials") || rawMsg.toLowerCase().includes("invalid login")) {
-    throw new Error(
-      "SMTP Authentication Failed (535): Invalid username or password. For Gmail, make sure 2-Step Verification is active and you are using a 16-character Google App Password (not your normal Google account password)."
-    );
-  }
-  if (rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ESOCKETTIMEDOUT") || rawMsg.includes("greeting timeout")) {
-    throw new Error(
-      `SMTP Connection Timeout: Server did not respond at ${cfg.smtp_host}:${port}. Verify your host and port (try port 587 or 465).`
-    );
-  }
-  if (rawMsg.includes("ECONNREFUSED")) {
-    throw new Error(
-      `SMTP Connection Refused: Could not connect to ${cfg.smtp_host}:${port}. Please verify the host name and port.`
-    );
+    userFriendlyMsg = "SMTP Authentication Failed (535): Invalid username or password. For Gmail, make sure 2-Step Verification is active and you are using a 16-character Google App Password (not your normal Google account password).";
+  } else if (rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ESOCKETTIMEDOUT") || rawMsg.includes("greeting timeout")) {
+    userFriendlyMsg = `SMTP Connection Timeout: Server did not respond at ${cfg.smtp_host}:${port}. Verify your host and port (try port 587 or 465).`;
+  } else if (rawMsg.includes("ECONNREFUSED")) {
+    userFriendlyMsg = `SMTP Connection Refused: Could not connect to ${cfg.smtp_host}:${port}. Please verify the host name and port.`;
   }
 
-  throw new Error(`SMTP Error: ${rawMsg}`);
+  log(`[FAILURE] ${userFriendlyMsg}`);
+
+  const errToThrow = new Error(userFriendlyMsg);
+  (errToThrow as any).logs = logs;
+  (errToThrow as any).rawError = rawMsg;
+  throw errToThrow;
 }
 
 // ─── Shared email base template ───────────────────────────────────────────────
