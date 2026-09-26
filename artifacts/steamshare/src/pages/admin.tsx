@@ -3720,28 +3720,38 @@ function SmtpSettingsSection() {
 
   if (smtpData && !smtpInitialized[0]) {
     smtpInitialized[1](true);
-    setHost(smtpData.smtp_host);
-    setPort(smtpData.smtp_port);
-    setUser(smtpData.smtp_user);
-    setPass(smtpData.smtp_pass);
-    setFrom(smtpData.smtp_from);
+    setHost(smtpData.smtp_host || "");
+    setPort(smtpData.smtp_port || "587");
+    setUser(smtpData.smtp_user || "");
+    setFrom(smtpData.smtp_from || "");
     setRegister2faEnabled(smtpData.register_2fa_enabled ?? true);
   }
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const payload: Record<string, any> = {
+        smtp_host: host.trim(),
+        smtp_port: port.trim(),
+        smtp_user: user.trim(),
+        smtp_from: from.trim(),
+        register_2fa_enabled: register2faEnabled,
+      };
+      if (pass.trim()) {
+        payload.smtp_pass = pass.trim();
+      }
       const res = await fetch("/api/site-settings/smtp", {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ smtp_host: host, smtp_port: port, smtp_user: user, smtp_pass: pass, smtp_from: from, register_2fa_enabled: register2faEnabled }),
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed"); }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed to save settings"); }
       return res.json();
     },
     onSuccess: () => {
+      setPass("");
       queryClient.invalidateQueries({ queryKey: ["admin-smtp"] });
-      toast({ title: "SMTP settings saved" });
+      toast({ title: "SMTP settings saved", description: "Email configuration has been updated." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -3752,7 +3762,7 @@ function SmtpSettingsSection() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: testEmail }),
+        body: JSON.stringify({ to: testEmail.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to send test email.");
@@ -3773,7 +3783,7 @@ function SmtpSettingsSection() {
       </div>
       <p className="text-sm text-muted-foreground mb-5">
         Used to send 2FA login codes to users. Works with Gmail, Outlook, or any SMTP provider.<br />
-        <span className="text-xs">For Gmail: use an <b>App Password</b> (not your regular password) — create one at Google Account → Security → 2-Step Verification → App passwords.</span>
+        <span className="text-xs">For Gmail: use an <b>App Password</b> (16 letters, created at Google Account → Security → 2-Step Verification → App passwords). Normal Google account passwords will be rejected.</span>
       </p>
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3 mb-4">
         <div>
@@ -3789,24 +3799,56 @@ function SmtpSettingsSection() {
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
             <label className="text-xs font-medium text-foreground mb-1.5 block">SMTP Host</label>
-            <Input placeholder="smtp.gmail.com" value={host} onChange={(e) => setHost(e.target.value)} />
+            <Input
+              placeholder="smtp.gmail.com"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+            />
           </div>
           <div>
             <label className="text-xs font-medium text-foreground mb-1.5 block">Port</label>
-            <Input placeholder="587" value={port} onChange={(e) => setPort(e.target.value)} />
+            <Input
+              placeholder="587"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+            />
           </div>
         </div>
         <div>
           <label className="text-xs font-medium text-foreground mb-1.5 block">Username / Email</label>
-          <Input placeholder="yourapp@gmail.com" value={user} onChange={(e) => setUser(e.target.value)} />
+          <Input
+            placeholder="yourapp@gmail.com"
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+            autoComplete="off"
+            data-lpignore="true"
+          />
         </div>
         <div>
           <label className="text-xs font-medium text-foreground mb-1.5 block">Password / App Password</label>
-          <Input type="password" placeholder={smtpData?.configured ? "Leave blank to keep current" : "App password or SMTP password"} value={pass} onChange={(e) => setPass(e.target.value)} />
+          <Input
+            type="password"
+            placeholder={smtpData?.configured ? "•••••••• (Password configured — leave blank to keep)" : "App password or SMTP password"}
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-form-type="other"
+          />
         </div>
         <div>
           <label className="text-xs font-medium text-foreground mb-1.5 block">From Address (optional)</label>
-          <Input placeholder="Steam Family <noreply@yourapp.com>" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Input
+            placeholder="Steam Family <noreply@yourapp.com>"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            autoComplete="off"
+            data-lpignore="true"
+          />
         </div>
         <Button className="w-full" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save SMTP Settings"}
@@ -3816,7 +3858,7 @@ function SmtpSettingsSection() {
         {smtpData?.configured && (
           <div className="pt-3 border-t border-border space-y-2">
             <label className="text-xs font-medium text-foreground block">Send a test email</label>
-            <p className="text-xs text-muted-foreground">Enter any email address and click Send — you'll see the exact error if something is wrong.</p>
+            <p className="text-xs text-muted-foreground">Enter any email address and click Send — you'll see the exact result or error if something is wrong.</p>
             <div className="flex gap-2">
               <Input
                 placeholder="test@gmail.com"
@@ -3824,6 +3866,7 @@ function SmtpSettingsSection() {
                 onChange={(e) => setTestEmail(e.target.value)}
                 type="email"
                 className="flex-1"
+                autoComplete="off"
               />
               <Button
                 variant="outline"

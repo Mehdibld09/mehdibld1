@@ -1,19 +1,14 @@
 import nodemailer from "nodemailer";
-import { db, siteSettingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { getAllSettings } from "./settingsStore";
 
-const SMTP_KEYS = ["smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_from"] as const;
-
-async function getSmtpConfig(): Promise<Record<(typeof SMTP_KEYS)[number], string>> {
-  const rows = await db.select().from(siteSettingsTable);
-  const map: Record<string, string> = {};
-  for (const r of rows) map[r.key] = r.value;
+export async function getSmtpConfig(): Promise<Record<string, string>> {
+  const all = await getAllSettings();
   return {
-    smtp_host: map.smtp_host ?? "",
-    smtp_port: map.smtp_port ?? "587",
-    smtp_user: map.smtp_user ?? "",
-    smtp_pass: map.smtp_pass ?? "",
-    smtp_from: map.smtp_from ?? "",
+    smtp_host: all.smtp_host ?? process.env.SMTP_HOST ?? "",
+    smtp_port: all.smtp_port ?? process.env.SMTP_PORT ?? "587",
+    smtp_user: all.smtp_user ?? process.env.SMTP_USER ?? "",
+    smtp_pass: all.smtp_pass ?? process.env.SMTP_PASS ?? "",
+    smtp_from: all.smtp_from ?? process.env.SMTP_FROM ?? "",
   };
 }
 
@@ -33,23 +28,81 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
     throw new Error("SMTP is not configured. Please set it in the admin panel under Site Settings → Email (SMTP).");
   }
 
+  const port = parseInt(cfg.smtp_port, 10) || 587;
+  const isGmail = cfg.smtp_host.toLowerCase().includes("gmail.com") || cfg.smtp_user.toLowerCase().includes("gmail.com");
+
+  // Google App Passwords are 16 letters usually separated by spaces (e.g. "abcd efgh ijkl mnop").
+  // Strip middle spaces so SMTP AUTH succeeds.
+  let cleanPass = cfg.smtp_pass;
+  if (isGmail || /^[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}$/.test(cleanPass)) {
+    cleanPass = cleanPass.replace(/\s+/g, "");
+  }
+
   const transporter = nodemailer.createTransport({
     host: cfg.smtp_host,
-    port: parseInt(cfg.smtp_port, 10) || 587,
-    secure: parseInt(cfg.smtp_port, 10) === 465,
-    auth: { user: cfg.smtp_user, pass: cfg.smtp_pass },
-    connectionTimeout: 15_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
-    tls: { rejectUnauthorized: false },
+    port,
+    secure: port === 465,
+    auth: { user: cfg.smtp_user.trim(), pass: cleanPass },
+    family: 4, // Force IPv4 to prevent IPv6 routing stalls in container environments
+    connectionTimeout: 20_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
+    tls: {
+      rejectUnauthorized: false,
+      minVersion: "TLSv1.2",
+    },
   });
 
-  await transporter.sendMail({
+  const mailOptions = {
     from: cfg.smtp_from || cfg.smtp_user,
     to,
     subject,
     html,
-  });
+  };
+
+  let lastError: any = null;
+  // Retry once on transient network/socket drops
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await transporter.sendMail(mailOptions);
+      return;
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || err);
+      const isTransient =
+        errMsg.includes("ETIMEDOUT") ||
+        errMsg.includes("ESOCKETTIMEDOUT") ||
+        errMsg.includes("ECONNRESET") ||
+        errMsg.includes("EAI_AGAIN") ||
+        errMsg.includes("greeting timeout");
+
+      if (attempt === 1 && isTransient) {
+        console.warn(`[SMTP] Attempt 1 failed with transient error: ${errMsg}. Retrying in 1.5s...`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+      break;
+    }
+  }
+
+  const rawMsg = lastError?.message || String(lastError);
+  if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("badcredentials") || rawMsg.toLowerCase().includes("invalid login")) {
+    throw new Error(
+      "SMTP Authentication Failed (535): Invalid username or password. For Gmail, make sure 2-Step Verification is active and you are using a 16-character Google App Password (not your normal Google account password)."
+    );
+  }
+  if (rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ESOCKETTIMEDOUT") || rawMsg.includes("greeting timeout")) {
+    throw new Error(
+      `SMTP Connection Timeout: Server did not respond at ${cfg.smtp_host}:${port}. Verify your host and port (try port 587 or 465).`
+    );
+  }
+  if (rawMsg.includes("ECONNREFUSED")) {
+    throw new Error(
+      `SMTP Connection Refused: Could not connect to ${cfg.smtp_host}:${port}. Please verify the host name and port.`
+    );
+  }
+
+  throw new Error(`SMTP Error: ${rawMsg}`);
 }
 
 // ─── Shared email base template ───────────────────────────────────────────────

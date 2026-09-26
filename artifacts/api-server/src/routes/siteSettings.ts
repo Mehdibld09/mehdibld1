@@ -5,6 +5,7 @@ import { eq, asc, and } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { invalidateWordCache } from "../lib/contentFilter";
 import { XP_DEFAULTS, XpSettingKey, getAllXpSettings } from "../lib/settings";
+import { getAllSettings, saveSettings } from "../lib/settingsStore";
 
 const router = express.Router();
 
@@ -241,20 +242,21 @@ router.delete("/ads/:id", requireAdmin, async (req, res) => {
   res.json({ message: "Ad deleted" });
 });
 
-const SMTP_KEYS = ["smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_from"] as const;
-
 // GET /site-settings/smtp — admin only, returns current SMTP config (password masked)
 router.get("/smtp", requireAdmin, async (_req, res) => {
-  const rows = await db.select().from(siteSettingsTable);
-  const map: Record<string, string> = {};
-  for (const r of rows) map[r.key] = r.value;
+  const map = await getAllSettings();
+  const host = map.smtp_host ?? process.env.SMTP_HOST ?? "";
+  const port = map.smtp_port ?? process.env.SMTP_PORT ?? "587";
+  const user = map.smtp_user ?? process.env.SMTP_USER ?? "";
+  const pass = map.smtp_pass ?? process.env.SMTP_PASS ?? "";
+  const from = map.smtp_from ?? process.env.SMTP_FROM ?? "";
   res.json({
-    smtp_host: map.smtp_host ?? "",
-    smtp_port: map.smtp_port ?? "587",
-    smtp_user: map.smtp_user ?? "",
-    smtp_pass: map.smtp_pass ? "••••••••" : "",
-    smtp_from: map.smtp_from ?? "",
-    configured: !!(map.smtp_host && map.smtp_user && map.smtp_pass),
+    smtp_host: host,
+    smtp_port: port,
+    smtp_user: user,
+    smtp_pass: pass ? "••••••••" : "",
+    smtp_from: from,
+    configured: !!(host && user && pass),
     register_2fa_enabled: map.register_2fa_enabled !== "0",
   });
 });
@@ -278,7 +280,8 @@ router.post("/smtp/test", requireAdmin, async (req, res) => {
     );
     res.json({ message: "Test email sent successfully." });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message ?? "Failed to send test email." });
+    const rawMsg = err?.message ?? "Failed to send test email.";
+    res.status(500).json({ error: rawMsg });
   }
 });
 
@@ -295,16 +298,16 @@ router.put("/smtp", requireAdmin, async (req, res) => {
   ];
 
   // Only update password if a real value (not the masked placeholder) is provided
-  if (smtp_pass && smtp_pass !== "••••••••") {
-    pairs.push(["smtp_pass", String(smtp_pass).trim()]);
+  if (smtp_pass && typeof smtp_pass === "string" && smtp_pass.trim() && smtp_pass !== "••••••••") {
+    let cleanPass = smtp_pass.trim();
+    // If it's a Gmail App Password copied with spaces (e.g. "abcd efgh ijkl mnop"), strip spaces
+    if (cleanPass.includes(" ") && (String(smtp_host || "").includes("gmail") || String(smtp_user || "").includes("gmail") || /^[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}$/.test(cleanPass))) {
+      cleanPass = cleanPass.replace(/\s+/g, "");
+    }
+    pairs.push(["smtp_pass", cleanPass]);
   }
 
-  for (const [key, value] of pairs) {
-    await db
-      .insert(siteSettingsTable)
-      .values({ key, value, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: siteSettingsTable.key, set: { value, updatedAt: new Date() } });
-  }
+  await saveSettings(pairs);
 
   res.json({ message: "SMTP settings saved" });
 });
