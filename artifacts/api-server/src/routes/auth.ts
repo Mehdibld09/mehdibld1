@@ -156,7 +156,7 @@ router.post("/register", async (req, res) => {
   try {
     await sendEmail(
       email,
-      "Your Steam Family verification code",
+      "SteamFamily: Your verification code",
       registrationCodeEmailHtml(registrationCode, username, verifyUrl),
     );
     // Email sent — require the one-time code before creating a session.
@@ -322,7 +322,7 @@ router.post("/resend-verification", async (req, res) => {
   try {
     await sendEmail(
       email,
-      "Your Steam Family verification code",
+      "SteamFamily: Your verification code",
       registrationCodeEmailHtml(code, user.username, verifyUrl),
     );
   } catch {
@@ -400,7 +400,7 @@ router.post("/login", async (req, res) => {
       .where(eq(usersTable.id, user.id));
 
     try {
-      await sendEmail(user.email, "Your login code", twoFactorEmailHtml(code, user.username));
+      await sendEmail(user.email, "SteamFamily: Your login code", twoFactorEmailHtml(code, user.username));
     } catch (emailErr: any) {
       const msg: string = emailErr?.message ?? "";
       // If SMTP is simply not configured yet, fall through to a normal login
@@ -649,7 +649,7 @@ router.put("/change-password", requireAuth, async (req, res) => {
   try {
     await sendEmail(
       user.email,
-      "Confirm your Steam Family password change",
+      "SteamFamily: Confirm your password change",
       passwordChangeEmailHtml(code, user.username),
     );
   } catch (emailErr: any) {

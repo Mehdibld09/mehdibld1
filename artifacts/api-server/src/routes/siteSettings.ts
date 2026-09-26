@@ -291,7 +291,7 @@ router.post("/smtp/test", requireAdmin, async (req, res) => {
   try {
     const result = await sendEmail(
       to.trim(),
-      "SMTP test from Steam Family",
+      "SteamFamily: SMTP Test Email",
       `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f1117;color:#e2e8f0;border-radius:12px">
         <h2 style="margin:0 0 8px;font-size:22px;color:#fff">✅ SMTP is working!</h2>
         <p style="margin:0;color:#94a3b8;font-size:14px">Your email configuration is set up correctly. 2FA codes will be delivered successfully.</p>

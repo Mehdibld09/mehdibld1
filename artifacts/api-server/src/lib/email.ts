@@ -38,6 +38,32 @@ export function getLastSmtpResult(): SendEmailResult | null {
   return lastSmtpResult;
 }
 
+export function formatSenderAddress(rawFrom?: string, fallbackUser?: string): string {
+  const candidate = (rawFrom || fallbackUser || "").trim();
+  if (!candidate) {
+    return `"SteamFamily" <noreply@steamfamily.com>`;
+  }
+
+  // Handle format: "Display Name" <email@domain.com> or Display Name <email@domain.com>
+  const angleMatch = candidate.match(/^(?:"?([^"<]+)"?\s*)?<([^>]+)>$/);
+  if (angleMatch) {
+    let displayName = angleMatch[1]?.trim() || "";
+    const email = angleMatch[2]?.trim();
+    const localPart = email.split("@")[0].toLowerCase();
+    if (!displayName || displayName.toLowerCase() === "contact" || displayName.toLowerCase() === localPart) {
+      displayName = "SteamFamily";
+    }
+    return `"${displayName}" <${email}>`;
+  }
+
+  // Plain email address (e.g. contact@domain.com) -> "SteamFamily" <contact@domain.com>
+  if (candidate.includes("@")) {
+    return `"SteamFamily" <${candidate}>`;
+  }
+
+  return `"SteamFamily" <${candidate}>`;
+}
+
 export async function sendEmail(to: string, subject: string, html: string): Promise<SendEmailResult> {
   const startTime = Date.now();
   const logs: string[] = [];
@@ -76,9 +102,11 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
     log(`Sanitized Google App Password whitespace (16 chars)`);
   }
 
+  const senderFrom = formatSenderAddress(cfg.smtp_from, cfg.smtp_user);
+
   log(`Target SMTP server: ${cfg.smtp_host}:${port} (${port === 465 ? 'SSL direct' : 'STARTTLS'})`);
   log(`Auth user: ${cfg.smtp_user}`);
-  log(`From header: ${cfg.smtp_from || cfg.smtp_user}`);
+  log(`From header: ${senderFrom}`);
 
   const transporter = nodemailer.createTransport({
     host: cfg.smtp_host,
@@ -96,7 +124,7 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   });
 
   const mailOptions = {
-    from: cfg.smtp_from || cfg.smtp_user,
+    from: senderFrom,
     to,
     subject,
     html,
@@ -187,7 +215,7 @@ function emailBase(content: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Steam Family</title>
+  <title>SteamFamily</title>
 </head>
 <body style="margin:0;padding:0;background-color:#09090b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#09090b;padding:40px 16px;">
@@ -202,7 +230,7 @@ function emailBase(content: string): string {
                 <tr>
                    <td style="background:#14b8a6;width:8px;height:32px;border-radius:4px;"></td>
                   <td style="padding-left:12px;">
-                     <span style="font-size:20px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">Steam <span style="color:#2dd4bf;">Family</span></span>
+                     <span style="font-size:20px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">Steam<span style="color:#2dd4bf;">Family</span></span>
                   </td>
                 </tr>
               </table>
@@ -220,7 +248,7 @@ function emailBase(content: string): string {
           <tr>
             <td style="padding-top:24px;text-align:center;">
               <p style="margin:0;color:#52525b;font-size:12px;line-height:1.6;">
-                This email was sent by Steam Family. If you didn't request it, you can safely ignore it.
+                This email was sent by SteamFamily. If you didn't request it, you can safely ignore it.
               </p>
             </td>
           </tr>

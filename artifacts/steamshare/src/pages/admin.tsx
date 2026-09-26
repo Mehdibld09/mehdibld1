@@ -3977,12 +3977,15 @@ function SmtpSettingsSection() {
             From Address {host.includes("brevo") ? "(Verified in Brevo)" : "(optional)"}
           </label>
           <Input
-            placeholder={host.includes("brevo") ? "Steam Family <verified-sender@yourdomain.com>" : "Steam Family <noreply@yourapp.com>"}
+            placeholder={host.includes("brevo") ? "SteamFamily <verified-sender@yourdomain.com>" : "SteamFamily <noreply@yourapp.com>"}
             value={from}
             onChange={(e) => setFrom(e.target.value)}
             autoComplete="off"
             data-lpignore="true"
           />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Sender name is formatted as <b>SteamFamily</b> automatically. You can enter <code>SteamFamily &lt;your-verified-email@domain.com&gt;</code> or just your email.
+          </p>
         </div>
         <Button className="w-full" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save SMTP Settings"}
