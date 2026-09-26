@@ -3826,10 +3826,86 @@ function SmtpSettingsSection() {
           <span className="ml-auto text-xs bg-green-500/15 text-green-400 border border-green-500/30 rounded-full px-2 py-0.5 font-medium">Configured</span>
         )}
       </div>
-      <p className="text-sm text-muted-foreground mb-5">
-        Used to send 2FA login codes to users. Works with Gmail, Outlook, or any SMTP provider.<br />
-        <span className="text-xs">For Gmail: use an <b>App Password</b> (16 letters, created at Google Account → Security → 2-Step Verification → App passwords). Normal Google account passwords will be rejected.</span>
+      <p className="text-sm text-muted-foreground mb-4">
+        Used to deliver 2FA login codes, password reset links, and verification emails. Works with <b>Brevo</b>, <b>Gmail</b>, or any standard SMTP service.
       </p>
+
+      {/* Provider Quick Presets */}
+      <div className="mb-4 p-3.5 bg-muted/40 border border-border/70 rounded-lg">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-foreground uppercase tracking-wider">Quick Provider Presets</span>
+          <span className="text-xs text-muted-foreground">Click to auto-fill host & port</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setHost("smtp-relay.brevo.com");
+              setPort("587");
+              toast({ title: "Brevo preset applied", description: "Host set to smtp-relay.brevo.com (Port 587). Enter your Brevo account email and SMTP Key." });
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
+              host.includes("brevo") || host.includes("sendinblue")
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/40 font-semibold"
+                : "bg-background hover:bg-muted text-foreground border-border"
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            Brevo (Recommended)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setHost("smtp.gmail.com");
+              setPort("587");
+              toast({ title: "Gmail preset applied", description: "Host set to smtp.gmail.com (Port 587). Remember to use a 16-letter App Password." });
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
+              host.includes("gmail")
+                ? "bg-blue-500/15 text-blue-400 border-blue-500/40 font-semibold"
+                : "bg-background hover:bg-muted text-foreground border-border"
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            Gmail
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setHost("smtp.office365.com");
+              setPort("587");
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
+              host.includes("office365") || host.includes("outlook")
+                ? "bg-sky-500/15 text-sky-400 border-sky-500/40 font-semibold"
+                : "bg-background hover:bg-muted text-foreground border-border"
+            }`}
+          >
+            Outlook / 365
+          </button>
+        </div>
+
+        {host.includes("brevo") && (
+          <div className="mt-3 text-xs bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 rounded-md p-3 space-y-1.5">
+            <p className="font-semibold text-emerald-300">Brevo (Sendinblue) Instructions:</p>
+            <ul className="list-disc list-inside space-y-1 text-emerald-200/90 pl-1 text-[11px] leading-relaxed">
+              <li><b>Username / Email:</b> Your Brevo login email address.</li>
+              <li><b>Password:</b> Your Brevo <b>SMTP Key</b> (go to <b>Brevo Dashboard → SMTP & API → SMTP</b> and copy or generate an SMTP key starting with <code>xsmtpsib-...</code>). <i>Do not use your personal Brevo account password.</i></li>
+              <li><b>From Address:</b> Must be a verified sender in Brevo (under <b>Senders & IP → Senders</b>).</li>
+            </ul>
+          </div>
+        )}
+
+        {host.includes("gmail") && (
+          <div className="mt-3 text-xs bg-blue-950/40 border border-blue-500/30 text-blue-200 rounded-md p-3 space-y-1 text-[11px] leading-relaxed">
+            <p className="font-semibold text-blue-300">Gmail Instructions:</p>
+            <p className="text-blue-200/90">
+              Go to <b>Google Account → Security → 2-Step Verification → App passwords</b>. Create a 16-letter App Password and paste it into the password field. Normal passwords are rejected.
+            </p>
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3 mb-4">
         <div>
           <p className="text-sm font-medium text-foreground">Require 2FA on registration</p>
@@ -3840,12 +3916,13 @@ function SmtpSettingsSection() {
           onCheckedChange={setRegister2faEnabled}
         />
       </div>
+
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
             <label className="text-xs font-medium text-foreground mb-1.5 block">SMTP Host</label>
             <Input
-              placeholder="smtp.gmail.com"
+              placeholder={host.includes("brevo") ? "smtp-relay.brevo.com" : "smtp.gmail.com"}
               value={host}
               onChange={(e) => setHost(e.target.value)}
               autoComplete="off"
@@ -3864,9 +3941,11 @@ function SmtpSettingsSection() {
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-foreground mb-1.5 block">Username / Email</label>
+          <label className="text-xs font-medium text-foreground mb-1.5 block">
+            {host.includes("brevo") ? "Brevo Login Email" : "Username / Email"}
+          </label>
           <Input
-            placeholder="yourapp@gmail.com"
+            placeholder={host.includes("brevo") ? "your-brevo-account@example.com" : "yourapp@gmail.com"}
             value={user}
             onChange={(e) => setUser(e.target.value)}
             autoComplete="off"
@@ -3874,10 +3953,18 @@ function SmtpSettingsSection() {
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-foreground mb-1.5 block">Password / App Password</label>
+          <label className="text-xs font-medium text-foreground mb-1.5 block">
+            {host.includes("brevo") ? "Brevo SMTP Key" : "Password / App Password"}
+          </label>
           <Input
             type="password"
-            placeholder={smtpData?.configured ? "•••••••• (Password configured — leave blank to keep)" : "App password or SMTP password"}
+            placeholder={
+              smtpData?.configured
+                ? "•••••••• (Password configured — leave blank to keep current)"
+                : host.includes("brevo")
+                ? "xsmtpsib-xxxxxxxxxxxxxxxxxxxx..."
+                : "App password or SMTP password"
+            }
             value={pass}
             onChange={(e) => setPass(e.target.value)}
             autoComplete="new-password"
@@ -3886,9 +3973,11 @@ function SmtpSettingsSection() {
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-foreground mb-1.5 block">From Address (optional)</label>
+          <label className="text-xs font-medium text-foreground mb-1.5 block">
+            From Address {host.includes("brevo") ? "(Verified in Brevo)" : "(optional)"}
+          </label>
           <Input
-            placeholder="Steam Family <noreply@yourapp.com>"
+            placeholder={host.includes("brevo") ? "Steam Family <verified-sender@yourdomain.com>" : "Steam Family <noreply@yourapp.com>"}
             value={from}
             onChange={(e) => setFrom(e.target.value)}
             autoComplete="off"

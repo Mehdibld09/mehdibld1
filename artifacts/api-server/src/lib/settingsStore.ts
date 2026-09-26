@@ -57,6 +57,19 @@ export async function getAllSettings(): Promise<Record<string, string>> {
     console.warn("[SettingsStore] DB query failed, using file fallback:", dbErr?.message || dbErr);
   }
 
+  // Fallback to Brevo or standard SMTP environment variables if not configured in DB/file
+  if (!result.smtp_pass && (process.env.BREVO_SMTP_KEY || process.env.BREVO_API_KEY)) {
+    result.smtp_pass = process.env.BREVO_SMTP_KEY || process.env.BREVO_API_KEY || "";
+    if (!result.smtp_host) result.smtp_host = "smtp-relay.brevo.com";
+    if (!result.smtp_port) result.smtp_port = process.env.BREVO_SMTP_PORT || "587";
+    if (!result.smtp_user && (process.env.BREVO_SMTP_USER || process.env.BREVO_LOGIN_EMAIL)) {
+      result.smtp_user = process.env.BREVO_SMTP_USER || process.env.BREVO_LOGIN_EMAIL || "";
+    }
+    if (!result.smtp_from && process.env.BREVO_FROM_EMAIL) {
+      result.smtp_from = process.env.BREVO_FROM_EMAIL;
+    }
+  }
+
   // Fallback to process.env for standard SMTP variables if not already set
   if (!result.smtp_host && process.env.SMTP_HOST) result.smtp_host = process.env.SMTP_HOST;
   if (!result.smtp_port && process.env.SMTP_PORT) result.smtp_port = process.env.SMTP_PORT;

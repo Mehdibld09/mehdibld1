@@ -60,6 +60,13 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
 
   const port = parseInt(cfg.smtp_port, 10) || 587;
   const isGmail = cfg.smtp_host.toLowerCase().includes("gmail.com") || cfg.smtp_user.toLowerCase().includes("gmail.com");
+  const isBrevo = cfg.smtp_host.toLowerCase().includes("brevo.com") || cfg.smtp_host.toLowerCase().includes("sendinblue.com");
+
+  if (isBrevo) {
+    log(`Provider: Brevo (Sendinblue) SMTP Relay on port ${port}`);
+  } else if (isGmail) {
+    log(`Provider: Google Gmail SMTP on port ${port}`);
+  }
 
   // Google App Passwords are 16 letters usually separated by spaces (e.g. "abcd efgh ijkl mnop").
   // Strip middle spaces so SMTP AUTH succeeds.
@@ -77,7 +84,7 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
     host: cfg.smtp_host,
     port,
     secure: port === 465,
-    auth: { user: cfg.smtp_user.trim(), pass: cleanPass },
+    auth: { user: cfg.smtp_user.trim(), pass: cleanPass.trim() },
     family: 4, // Force IPv4 to prevent IPv6 routing stalls in container environments
     connectionTimeout: 20_000,
     greetingTimeout: 15_000,
@@ -148,7 +155,15 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   const rawMsg = lastError?.message || String(lastError);
   let userFriendlyMsg = `SMTP Error: ${rawMsg}`;
 
-  if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("badcredentials") || rawMsg.toLowerCase().includes("invalid login")) {
+  if (isBrevo) {
+    if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("badcredentials") || rawMsg.toLowerCase().includes("invalid login") || rawMsg.toLowerCase().includes("authentication")) {
+      userFriendlyMsg = "Brevo SMTP Authentication Failed (535): Invalid Brevo login email or SMTP Key. Go to Brevo → SMTP & API → Generate or copy your SMTP Key (starts with xsmtpsib-). Do NOT use your Brevo account password; you must use the generated SMTP Key.";
+    } else if (rawMsg.includes("550") || rawMsg.includes("421") || rawMsg.toLowerCase().includes("sender") || rawMsg.toLowerCase().includes("unauthenticated")) {
+      userFriendlyMsg = `Brevo Sender Error: The 'From' address (${cfg.smtp_from || cfg.smtp_user}) must be a verified sender in your Brevo account under 'Senders & IP' → 'Senders'.`;
+    } else if (rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ESOCKETTIMEDOUT") || rawMsg.includes("greeting timeout")) {
+      userFriendlyMsg = `Brevo Connection Timeout: Could not reach smtp-relay.brevo.com:${port}. Try port 587.`;
+    }
+  } else if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("badcredentials") || rawMsg.toLowerCase().includes("invalid login")) {
     userFriendlyMsg = "SMTP Authentication Failed (535): Invalid username or password. For Gmail, make sure 2-Step Verification is active and you are using a 16-character Google App Password (not your normal Google account password).";
   } else if (rawMsg.includes("ETIMEDOUT") || rawMsg.includes("ESOCKETTIMEDOUT") || rawMsg.includes("greeting timeout")) {
     userFriendlyMsg = `SMTP Connection Timeout: Server did not respond at ${cfg.smtp_host}:${port}. Verify your host and port (try port 587 or 465).`;
