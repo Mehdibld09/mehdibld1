@@ -296,7 +296,8 @@ router.post("/smtp/test", requireAdmin, async (req, res) => {
         <h2 style="margin:0 0 8px;font-size:22px;color:#fff">✅ SMTP is working!</h2>
         <p style="margin:0;color:#94a3b8;font-size:14px">Your email configuration is set up correctly. 2FA codes will be delivered successfully.</p>
         <p style="margin:16px 0 0;color:#64748b;font-size:11px">Delivered at: ${new Date().toUTCString()}</p>
-      </div>`
+      </div>`,
+      "smtp_test"
     );
     res.json({
       success: true,
@@ -347,6 +348,28 @@ router.put("/smtp", requireAdmin, async (req, res) => {
   await saveSettings(pairs);
 
   res.json({ message: "SMTP settings saved" });
+});
+
+// GET /site-settings/email-stats — admin only, get email statistics and logs
+router.get("/email-stats", requireAdmin, async (_req, res) => {
+  try {
+    const { getEmailStats } = await import("../lib/emailStatsStore");
+    const stats = getEmailStats();
+    res.json({ success: true, stats });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Failed to load email statistics" });
+  }
+});
+
+// POST /site-settings/email-stats/reset — admin only, reset email statistics
+router.post("/email-stats/reset", requireAdmin, async (_req, res) => {
+  try {
+    const { resetEmailStats } = await import("../lib/emailStatsStore");
+    const stats = resetEmailStats();
+    res.json({ success: true, message: "Email statistics have been reset.", stats });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Failed to reset email statistics" });
+  }
 });
 
 export default router;

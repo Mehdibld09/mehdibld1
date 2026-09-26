@@ -1,5 +1,16 @@
 import nodemailer from "nodemailer";
 import { getAllSettings } from "./settingsStore";
+import { recordEmailEvent, getEmailStats, resetEmailStats, type EmailPurpose } from "./emailStatsStore";
+export { getEmailStats, resetEmailStats, type EmailPurpose };
+
+function inferPurpose(subject: string): EmailPurpose {
+  const s = subject.toLowerCase();
+  if (s.includes("login code") || s.includes("2fa")) return "2fa_login";
+  if (s.includes("verification") || s.includes("verify") || s.includes("finish creating") || s.includes("activate")) return "verify_email";
+  if (s.includes("password")) return "password_reset";
+  if (s.includes("test")) return "smtp_test";
+  return "other";
+}
 
 export async function getSmtpConfig(): Promise<Record<string, string>> {
   const all = await getAllSettings();
@@ -64,15 +75,21 @@ export function formatSenderAddress(rawFrom?: string, fallbackUser?: string): st
   return `"SteamFamily" <${candidate}>`;
 }
 
-export async function sendEmail(to: string, subject: string, html: string): Promise<SendEmailResult> {
+export async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  purpose?: EmailPurpose
+): Promise<SendEmailResult> {
   const startTime = Date.now();
+  const effectivePurpose: EmailPurpose = purpose || inferPurpose(subject);
   const logs: string[] = [];
   const log = (msg: string) => {
     const time = new Date().toISOString().split("T")[1]?.slice(0, 8) || "";
     logs.push(`[${time}] ${msg}`);
   };
 
-  log(`Initiating send request to <${to}>...`);
+  log(`Initiating send request to <${to}> [purpose=${effectivePurpose}]...`);
   log(`Subject: "${subject}"`);
 
   const cfg = await getSmtpConfig();
@@ -81,6 +98,15 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
     const err = new Error("SMTP is not configured. Please set your SMTP Host, Username, and Password in the admin panel under Site Settings → Email (SMTP).");
     log(`[ERROR] Configuration check failed: Host="${cfg.smtp_host || 'MISSING'}", User="${cfg.smtp_user || 'MISSING'}", Pass="${cfg.smtp_pass ? 'PRESENT' : 'MISSING'}"`);
     (err as any).logs = logs;
+    recordEmailEvent({
+      recipient: to,
+      subject,
+      purpose: effectivePurpose,
+      status: "failed",
+      durationMs: Date.now() - startTime,
+      error: "SMTP credentials not configured",
+      provider: "None",
+    });
     throw err;
   }
 
@@ -157,6 +183,16 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
         logs,
       };
 
+      recordEmailEvent({
+        recipient: to,
+        subject,
+        purpose: effectivePurpose,
+        status: "success",
+        durationMs,
+        messageId: info.messageId || "",
+        provider: isBrevo ? "Brevo" : isGmail ? "Gmail" : "SMTP",
+      });
+
       lastSmtpResult = result;
       return result;
     } catch (err: any) {
@@ -200,6 +236,16 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   }
 
   log(`[FAILURE] ${userFriendlyMsg}`);
+
+  recordEmailEvent({
+    recipient: to,
+    subject,
+    purpose: effectivePurpose,
+    status: "failed",
+    durationMs: Date.now() - startTime,
+    error: userFriendlyMsg,
+    provider: isBrevo ? "Brevo" : isGmail ? "Gmail" : "SMTP",
+  });
 
   const errToThrow = new Error(userFriendlyMsg);
   (errToThrow as any).logs = logs;

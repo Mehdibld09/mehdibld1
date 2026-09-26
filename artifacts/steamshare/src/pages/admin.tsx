@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Fragment, useState, useEffect, type ReactNode } from "react";
-import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles, Terminal } from "lucide-react";
+import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles, Terminal, BarChart3, Activity, KeyRound, CheckCircle2, TrendingUp } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownEditor } from "@/components/markdown-editor";
 
@@ -319,6 +319,7 @@ export default function Admin() {
     {
       group: "System & Security",
       items: [
+        { value: "email-analytics", label: "Email & 2FA Stats", icon: Mail, modAllowed: false },
         { value: "site-settings", label: "Site Settings", icon: Settings, modAllowed: false },
         { value: "premium", label: "Premium & VIP", icon: Star, modAllowed: false },
         { value: "ip-bans", label: "IP Bans", icon: Ban, modAllowed: false },
@@ -485,6 +486,7 @@ export default function Admin() {
                   {activeTab === "dashboard" && "Real-time statistics, registrations, activity analytics, and circulation metrics."}
                   {activeTab === "store" && "Configure VIP and Premium store packages, pricing, and perks."}
                   {activeTab === "announcements" && "Broadcast site-wide news, alerts, and popup announcements instantly."}
+                  {activeTab === "email-analytics" && "Real-time delivery statistics for 2FA login codes, account verifications, password resets, and SMTP diagnostics."}
                   {activeTab === "site-settings" && "Configure automated word filters, XP rewards, ticker alerts, and ads."}
                   {activeTab === "premium" && "Grant premium subscriptions, manage pricing, and test checkout flows."}
                   {activeTab === "ip-bans" && "Block malicious IP addresses from registration and authentication."}
@@ -502,6 +504,12 @@ export default function Admin() {
               {activeTab === "reports" && <ReportsTab />}
               {isAdmin && activeTab === "store" && <StoreTab />}
               {isAdmin && activeTab === "announcements" && <AnnouncementsTab />}
+              {isAdmin && activeTab === "email-analytics" && (
+                <div className="space-y-6">
+                  <EmailStatsSection />
+                  <SmtpSettingsSection />
+                </div>
+              )}
               {isAdmin && activeTab === "site-settings" && <SiteSettingsTab />}
               {isAdmin && activeTab === "premium" && <PremiumAdminTab />}
               {isAdmin && activeTab === "ip-bans" && <IpBansTab />}
@@ -3692,6 +3700,9 @@ function SiteSettingsTab() {
 
       {/* Email (SMTP) Settings */}
       <SmtpSettingsSection />
+
+      {/* Email & 2FA Delivery Statistics */}
+      <EmailStatsSection />
     </div>
   );
 }
@@ -3803,12 +3814,14 @@ function SmtpSettingsSection() {
       return data;
     },
     onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-email-stats"] });
       toast({
         title: "Test email delivered!",
         description: `SMTP accepted message for ${testEmail.trim()} (${data?.details?.durationMs ? `${data.details.durationMs}ms` : 'OK'}).`,
       });
     },
     onError: (e: any) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-email-stats"] });
       toast({
         title: "SMTP test failed",
         description: e.message,
@@ -4145,6 +4158,548 @@ function SmtpSettingsSection() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmailStatsSection() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [filterPurpose, setFilterPurpose] = useState<string>("all");
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ["admin-email-stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/site-settings/email-stats", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load email delivery statistics");
+      return res.json();
+    },
+    refetchInterval: 12000,
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/site-settings/email-stats/reset", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to reset statistics");
+      return res.json();
+    },
+    onSuccess: () => {
+      setConfirmResetOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["admin-email-stats"] });
+      toast({
+        title: "Statistics Reset",
+        description: "Email volume counters and recent delivery logs have been cleared.",
+      });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Reset Failed",
+        description: e.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const stats = data?.stats;
+  const byPurpose = stats?.byPurpose || {
+    "2fa_login": { total: 0, success: 0, failed: 0 },
+    "verify_email": { total: 0, success: 0, failed: 0 },
+    "password_reset": { total: 0, success: 0, failed: 0 },
+    "smtp_test": { total: 0, success: 0, failed: 0 },
+    "other": { total: 0, success: 0, failed: 0 },
+  };
+
+  const totalDispatched = stats?.totalSent || 0;
+  const totalSuccess = stats?.totalSuccess || 0;
+  const totalFailed = stats?.totalFailed || 0;
+  const successRate = stats?.successRate ?? (totalDispatched > 0 ? Math.round((totalSuccess / totalDispatched) * 100) : 100);
+  const avgLatency = stats?.avgDurationMs || 0;
+  const lastSentAt = stats?.lastSentAt;
+
+  const logs: any[] = stats?.recentLogs || [];
+  const filteredLogs = filterPurpose === "all"
+    ? logs
+    : logs.filter((l) => l.purpose === filterPurpose);
+
+  const getPurposeBadge = (purpose: string) => {
+    switch (purpose) {
+      case "2fa_login":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+            <KeyRound className="h-3 w-3" />
+            2FA Login Code
+          </span>
+        );
+      case "verify_email":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+            <CheckCircle2 className="h-3 w-3" />
+            Verification
+          </span>
+        );
+      case "password_reset":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+            <Shield className="h-3 w-3" />
+            Password Reset
+          </span>
+        );
+      case "smtp_test":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <Terminal className="h-3 w-3" />
+            SMTP Test
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-zinc-500/15 text-zinc-300 border border-zinc-500/30">
+            <Mail className="h-3 w-3" />
+            System Mail
+          </span>
+        );
+    }
+  };
+
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return "Never";
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) +
+        " (" + d.toLocaleDateString([], { month: "short", day: "numeric" }) + ")";
+    } catch {
+      return isoString;
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5 text-primary" />
+            <h3 className="font-bold text-foreground text-lg">Email & 2FA Delivery Analytics</h3>
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live Monitor
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Real-time delivery counts, 2FA code volume, verification metrics, and SMTP reliability statistics.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="h-8 text-xs flex items-center gap-1.5"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin text-primary" : ""}`} />
+            <span>{isFetching ? "Refreshing..." : "Refresh"}</span>
+          </Button>
+
+          {confirmResetOpen ? (
+            <div className="flex items-center gap-1.5 animate-in fade-in">
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => resetMutation.mutate()}
+                disabled={resetMutation.isPending}
+              >
+                {resetMutation.isPending ? "Resetting..." : "Confirm Reset"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-muted-foreground"
+                onClick={() => setConfirmResetOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmResetOpen(true)}
+              className="h-8 text-xs text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 flex items-center gap-1"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Reset Stats
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* KPI Cards Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* 2FA Login Codes (Special Emphasis as requested) */}
+        <div className="p-3.5 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-cyan-300/80 mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">2FA Login Codes</span>
+            <div className="p-1 rounded-md bg-cyan-500/20 text-cyan-300">
+              <KeyRound className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-cyan-200 tracking-tight">
+              {byPurpose["2fa_login"]?.total || 0}
+            </div>
+            <div className="text-[11px] text-cyan-300/70 mt-1 flex items-center justify-between font-mono">
+              <span className="text-emerald-400 font-semibold">{byPurpose["2fa_login"]?.success || 0} sent</span>
+              {byPurpose["2fa_login"]?.failed > 0 && (
+                <span className="text-rose-400 font-semibold">{byPurpose["2fa_login"]?.failed} failed</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Account Verifications */}
+        <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-emerald-300/80 mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Verifications</span>
+            <div className="p-1 rounded-md bg-emerald-500/20 text-emerald-300">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-emerald-200 tracking-tight">
+              {byPurpose["verify_email"]?.total || 0}
+            </div>
+            <div className="text-[11px] text-emerald-300/70 mt-1 flex items-center justify-between font-mono">
+              <span className="text-emerald-400 font-semibold">{byPurpose["verify_email"]?.success || 0} sent</span>
+              {byPurpose["verify_email"]?.failed > 0 && (
+                <span className="text-rose-400 font-semibold">{byPurpose["verify_email"]?.failed} failed</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Password Resets */}
+        <div className="p-3.5 rounded-xl border border-purple-500/30 bg-purple-950/20 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-purple-300/80 mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Password Resets</span>
+            <div className="p-1 rounded-md bg-purple-500/20 text-purple-300">
+              <Shield className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-purple-200 tracking-tight">
+              {byPurpose["password_reset"]?.total || 0}
+            </div>
+            <div className="text-[11px] text-purple-300/70 mt-1 flex items-center justify-between font-mono">
+              <span className="text-emerald-400 font-semibold">{byPurpose["password_reset"]?.success || 0} sent</span>
+              {byPurpose["password_reset"]?.failed > 0 && (
+                <span className="text-rose-400 font-semibold">{byPurpose["password_reset"]?.failed} failed</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* SMTP Diagnostics */}
+        <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-950/20 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-amber-300/80 mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">SMTP Tests</span>
+            <div className="p-1 rounded-md bg-amber-500/20 text-amber-300">
+              <Terminal className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-amber-200 tracking-tight">
+              {byPurpose["smtp_test"]?.total || 0}
+            </div>
+            <div className="text-[11px] text-amber-300/70 mt-1 flex items-center justify-between font-mono">
+              <span className="text-emerald-400 font-semibold">{byPurpose["smtp_test"]?.success || 0} sent</span>
+              {byPurpose["smtp_test"]?.failed > 0 && (
+                <span className="text-rose-400 font-semibold">{byPurpose["smtp_test"]?.failed} failed</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Total Emails Dispatched */}
+        <div className="p-3.5 rounded-xl border border-border bg-card/60 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Total Emails</span>
+            <div className="p-1 rounded-md bg-primary/20 text-primary">
+              <Mail className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-foreground tracking-tight">
+              {totalDispatched}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-1 flex items-center justify-between font-mono">
+              <span className="text-emerald-400 font-semibold">{totalSuccess} OK</span>
+              <span className={totalFailed > 0 ? "text-rose-400 font-semibold" : "text-zinc-500"}>{totalFailed} err</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Success Rate & Speed */}
+        <div className="p-3.5 rounded-xl border border-border bg-card/60 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Success Rate</span>
+            <div className="p-1 rounded-md bg-emerald-500/20 text-emerald-400">
+              <Activity className="h-3.5 w-3.5" />
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold text-emerald-400 tracking-tight flex items-baseline gap-1">
+              <span>{successRate}%</span>
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-1 font-mono">
+              Avg: <span className="text-zinc-300 font-semibold">{avgLatency ? `${avgLatency}ms` : "< 1s"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Breakdown Progress Bars */}
+      <div className="p-4 rounded-xl border border-border bg-secondary/20 space-y-3.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-foreground uppercase tracking-wider">Delivery Volume Breakdown</span>
+          <span className="text-xs text-muted-foreground font-mono">
+            Last Activity: {lastSentAt ? formatTime(lastSentAt) : "No activity recorded yet"}
+          </span>
+        </div>
+
+        <div className="space-y-2.5">
+          {/* 2FA Login Row */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <div className="flex items-center gap-1.5 text-cyan-300 font-medium">
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>2FA Login Verification</span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                <strong className="text-cyan-300 font-bold">{byPurpose["2fa_login"]?.total || 0}</strong> emails
+                {" "}({totalDispatched > 0 ? Math.round(((byPurpose["2fa_login"]?.total || 0) / totalDispatched) * 100) : 0}%)
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-secondary/80 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-500 rounded-full"
+                style={{
+                  width: `${totalDispatched > 0 ? ((byPurpose["2fa_login"]?.total || 0) / totalDispatched) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Account Verification Row */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <div className="flex items-center gap-1.5 text-emerald-300 font-medium">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Account Registration Codes</span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                <strong className="text-emerald-300 font-bold">{byPurpose["verify_email"]?.total || 0}</strong> emails
+                {" "}({totalDispatched > 0 ? Math.round(((byPurpose["verify_email"]?.total || 0) / totalDispatched) * 100) : 0}%)
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-secondary/80 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500 rounded-full"
+                style={{
+                  width: `${totalDispatched > 0 ? ((byPurpose["verify_email"]?.total || 0) / totalDispatched) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Password Resets Row */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <div className="flex items-center gap-1.5 text-purple-300 font-medium">
+                <Shield className="h-3.5 w-3.5" />
+                <span>Password Change Codes</span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                <strong className="text-purple-300 font-bold">{byPurpose["password_reset"]?.total || 0}</strong> emails
+                {" "}({totalDispatched > 0 ? Math.round(((byPurpose["password_reset"]?.total || 0) / totalDispatched) * 100) : 0}%)
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-secondary/80 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-purple-500 to-purple-400 transition-all duration-500 rounded-full"
+                style={{
+                  width: `${totalDispatched > 0 ? ((byPurpose["password_reset"]?.total || 0) / totalDispatched) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* SMTP Tests Row */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <div className="flex items-center gap-1.5 text-amber-300 font-medium">
+                <Terminal className="h-3.5 w-3.5" />
+                <span>SMTP Diagnostic Tests</span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                <strong className="text-amber-300 font-bold">{byPurpose["smtp_test"]?.total || 0}</strong> emails
+                {" "}({totalDispatched > 0 ? Math.round(((byPurpose["smtp_test"]?.total || 0) / totalDispatched) * 100) : 0}%)
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-secondary/80 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-500 rounded-full"
+                style={{
+                  width: `${totalDispatched > 0 ? ((byPurpose["smtp_test"]?.total || 0) / totalDispatched) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Dispatches Activity Table */}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-bold text-foreground">Recent Email Dispatches</h4>
+            <p className="text-xs text-muted-foreground">
+              Last {logs.length} outbound messages with delivery verification and timing.
+            </p>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1 bg-secondary/40 p-1 rounded-lg border border-border">
+            {[
+              { id: "all", label: "All" },
+              { id: "2fa_login", label: "2FA Login" },
+              { id: "verify_email", label: "Verification" },
+              { id: "password_reset", label: "Password" },
+              { id: "smtp_test", label: "SMTP Test" },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilterPurpose(f.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                  filterPurpose === f.id
+                    ? "bg-primary text-primary-foreground font-semibold shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table or Empty State */}
+        {isLoading ? (
+          <div className="p-8 text-center text-sm text-muted-foreground animate-pulse">
+            Loading email delivery metrics...
+          </div>
+        ) : filteredLogs.length === 0 ? (
+          <div className="p-8 rounded-xl border border-dashed border-border bg-secondary/10 text-center space-y-2">
+            <Mail className="h-8 w-8 text-muted-foreground/50 mx-auto" />
+            <p className="text-sm font-medium text-foreground">
+              {filterPurpose === "all" ? "No email dispatches recorded yet" : `No ${filterPurpose} emails recorded yet`}
+            </p>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Once users log in via 2FA, sign up for accounts, or when you trigger an SMTP test above, delivery records and proof of transmission will automatically populate here.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border overflow-hidden bg-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3">Time</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3">Recipient</th>
+                    <th className="py-2.5 px-3">Provider</th>
+                    <th className="py-2.5 px-3">Duration</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Message-ID / Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredLogs.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="py-2.5 px-3 text-muted-foreground font-mono whitespace-nowrap">
+                        {formatTime(entry.timestamp)}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        {getPurposeBadge(entry.purpose)}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-foreground font-medium whitespace-nowrap">
+                        {entry.recipient}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-secondary text-secondary-foreground">
+                          {entry.provider || "SMTP"}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground whitespace-nowrap">
+                        {entry.durationMs ? `${entry.durationMs}ms` : "-"}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        {entry.status === "success" ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold font-mono text-[11px]">
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            250 OK
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-rose-400 font-semibold font-mono text-[11px]">
+                            <XCircle className="h-3.5 w-3.5" />
+                            Failed
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 max-w-xs truncate font-mono text-[11px] text-muted-foreground">
+                        {entry.status === "success" ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate" title={entry.messageId || "Accepted"}>
+                              {entry.messageId ? entry.messageId : "Accepted by mail server"}
+                            </span>
+                            {entry.messageId && (
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(entry.messageId);
+                                  setCopiedId(entry.id);
+                                  setTimeout(() => setCopiedId(null), 1500);
+                                }}
+                                className="text-muted-foreground hover:text-foreground shrink-0"
+                                title="Copy Message-ID"
+                              >
+                                {copiedId === entry.id ? (
+                                  <Check className="h-3 w-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="h-3 w-3" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-rose-400 truncate block" title={entry.error}>
+                            {entry.error || "Connection error"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

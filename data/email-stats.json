@@ -1,0 +1,36 @@
+{
+  "totalSent": 0,
+  "totalSuccess": 0,
+  "totalFailed": 0,
+  "successRate": 100,
+  "avgDurationMs": 0,
+  "lastSentAt": null,
+  "byPurpose": {
+    "2fa_login": {
+      "total": 0,
+      "success": 0,
+      "failed": 0
+    },
+    "verify_email": {
+      "total": 0,
+      "success": 0,
+      "failed": 0
+    },
+    "password_reset": {
+      "total": 0,
+      "success": 0,
+      "failed": 0
+    },
+    "smtp_test": {
+      "total": 0,
+      "success": 0,
+      "failed": 0
+    },
+    "other": {
+      "total": 0,
+      "success": 0,
+      "failed": 0
+    }
+  },
+  "recentLogs": []
+}
