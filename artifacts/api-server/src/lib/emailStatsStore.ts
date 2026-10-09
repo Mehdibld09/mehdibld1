@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { db, siteSettingsTable, emailLogsTable } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 
 export type EmailPurpose = "2fa_login" | "verify_email" | "password_reset" | "smtp_test" | "other";
 
@@ -40,7 +42,7 @@ function ensureDataDir(): void {
   }
 }
 
-function getDefaultStats(): EmailStatsSummary {
+export function getDefaultStats(): EmailStatsSummary {
   return {
     totalSent: 0,
     totalSuccess: 0,
@@ -61,15 +63,13 @@ function getDefaultStats(): EmailStatsSummary {
 
 let inMemoryStats: EmailStatsSummary | null = null;
 
-function loadStats(): EmailStatsSummary {
-  if (inMemoryStats) return inMemoryStats;
-
+export function loadStatsFromFile(): EmailStatsSummary | null {
   try {
     if (fs.existsSync(STATS_FILE)) {
       const raw = fs.readFileSync(STATS_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.totalSent === "number") {
-        inMemoryStats = {
+        return {
           ...getDefaultStats(),
           ...parsed,
           byPurpose: {
@@ -78,18 +78,15 @@ function loadStats(): EmailStatsSummary {
           },
           recentLogs: Array.isArray(parsed.recentLogs) ? parsed.recentLogs : [],
         };
-        return inMemoryStats!;
       }
     }
   } catch (e) {
     console.warn("[EmailStats] Failed to read email-stats.json:", e);
   }
-
-  inMemoryStats = getDefaultStats();
-  return inMemoryStats;
+  return null;
 }
 
-function persistStats(stats: EmailStatsSummary): void {
+export function persistStatsToFile(stats: EmailStatsSummary): void {
   try {
     ensureDataDir();
     fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2), "utf-8");
@@ -107,7 +104,55 @@ export function maskEmail(email: string): string {
   return `${user[0]}***${user[user.length - 1]}@${domain}`;
 }
 
-export function recordEmailEvent(entry: {
+export function getEmailStats(): EmailStatsSummary {
+  if (inMemoryStats) return inMemoryStats;
+
+  const fileData = loadStatsFromFile();
+  if (fileData) {
+    inMemoryStats = fileData;
+    return inMemoryStats;
+  }
+
+  inMemoryStats = getDefaultStats();
+  return inMemoryStats;
+}
+
+/**
+ * Async version that ensures stats are synced with the database
+ */
+export async function getEmailStatsAsync(): Promise<EmailStatsSummary> {
+  // Try loading from database site_settings table first
+  try {
+    const rows = await db
+      .select()
+      .from(siteSettingsTable)
+      .where(eq(siteSettingsTable.key, "email_delivery_stats"));
+
+    if (rows && rows.length > 0 && rows[0]?.value) {
+      const parsed = JSON.parse(rows[0].value);
+      if (parsed && typeof parsed.totalSent === "number") {
+        inMemoryStats = {
+          ...getDefaultStats(),
+          ...parsed,
+          byPurpose: {
+            ...getDefaultStats().byPurpose,
+            ...(parsed.byPurpose || {}),
+          },
+          recentLogs: Array.isArray(parsed.recentLogs) ? parsed.recentLogs : [],
+        };
+        // Keep file synced
+        persistStatsToFile(inMemoryStats);
+        return inMemoryStats;
+      }
+    }
+  } catch (dbErr: any) {
+    // DB might not be configured or table empty, proceed to file/memory
+  }
+
+  return getEmailStats();
+}
+
+export async function recordEmailEvent(entry: {
   recipient: string;
   subject: string;
   purpose: EmailPurpose;
@@ -116,8 +161,9 @@ export function recordEmailEvent(entry: {
   messageId?: string;
   error?: string;
   provider?: string;
-}): void {
-  const stats = loadStats();
+}): Promise<void> {
+  const stats = getEmailStats();
+  const p = entry.purpose || "other";
 
   stats.totalSent += 1;
   if (entry.status === "success") {
@@ -138,7 +184,6 @@ export function recordEmailEvent(entry: {
   stats.lastSentAt = new Date().toISOString();
 
   // Purpose stats
-  const p = entry.purpose || "other";
   if (!stats.byPurpose[p]) {
     stats.byPurpose[p] = { total: 0, success: 0, failed: 0 };
   }
@@ -149,11 +194,11 @@ export function recordEmailEvent(entry: {
     stats.byPurpose[p].failed += 1;
   }
 
-  // Prepend recent log (keep last 50)
+  const masked = maskEmail(entry.recipient);
   const logItem: EmailLogEntry = {
     id: `em_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     timestamp: stats.lastSentAt,
-    recipient: maskEmail(entry.recipient),
+    recipient: masked,
     subject: entry.subject,
     purpose: p,
     status: entry.status,
@@ -163,18 +208,66 @@ export function recordEmailEvent(entry: {
     provider: entry.provider,
   };
 
-  stats.recentLogs = [logItem, ...(stats.recentLogs || [])].slice(0, 50);
+  stats.recentLogs = [logItem, ...(stats.recentLogs || [])].slice(0, 100);
 
   inMemoryStats = stats;
-  persistStats(stats);
+  // 1. Persist to file immediately
+  persistStatsToFile(stats);
+
+  // 2. Persist to DB site_settings table (key-value storage)
+  try {
+    await db
+      .insert(siteSettingsTable)
+      .values({
+        key: "email_delivery_stats",
+        value: JSON.stringify(stats),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: siteSettingsTable.key,
+        set: { value: JSON.stringify(stats), updatedAt: new Date() },
+      });
+  } catch (dbErr: any) {
+    // Non-fatal if DB is offline or mock
+  }
+
+  // 3. Persist individual log entry to emailLogsTable in DB
+  try {
+    await db.insert(emailLogsTable).values({
+      recipient: masked,
+      subject: entry.subject,
+      purpose: p,
+      status: entry.status,
+      durationMs: Math.round(entry.durationMs),
+      messageId: entry.messageId || null,
+      error: entry.error || null,
+      provider: entry.provider || null,
+      createdAt: new Date(),
+    });
+  } catch (dbErr: any) {
+    // Non-fatal if DB is offline or mock
+  }
 }
 
-export function getEmailStats(): EmailStatsSummary {
-  return loadStats();
-}
-
-export function resetEmailStats(): EmailStatsSummary {
+export async function resetEmailStats(): Promise<EmailStatsSummary> {
   inMemoryStats = getDefaultStats();
-  persistStats(inMemoryStats);
+  persistStatsToFile(inMemoryStats);
+
+  try {
+    await db
+      .insert(siteSettingsTable)
+      .values({
+        key: "email_delivery_stats",
+        value: JSON.stringify(inMemoryStats),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: siteSettingsTable.key,
+        set: { value: JSON.stringify(inMemoryStats), updatedAt: new Date() },
+      });
+  } catch (dbErr: any) {
+    // Non-fatal
+  }
+
   return inMemoryStats;
 }

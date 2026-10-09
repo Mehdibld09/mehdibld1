@@ -20,3 +20,4 @@ export * from "./premiumCodes";
 export * from "./ipBans";
 export * from "./accountClaims";
 export * from "./notifications";
+export * from "./emailLogs";

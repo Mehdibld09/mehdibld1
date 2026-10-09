@@ -1,19 +1,19 @@
 {
-  "totalSent": 0,
-  "totalSuccess": 0,
+  "totalSent": 2,
+  "totalSuccess": 2,
   "totalFailed": 0,
   "successRate": 100,
-  "avgDurationMs": 0,
-  "lastSentAt": null,
+  "avgDurationMs": 295,
+  "lastSentAt": "2026-09-26T20:36:39.481Z",
   "byPurpose": {
     "2fa_login": {
-      "total": 0,
-      "success": 0,
+      "total": 1,
+      "success": 1,
       "failed": 0
     },
     "verify_email": {
-      "total": 0,
-      "success": 0,
+      "total": 1,
+      "success": 1,
       "failed": 0
     },
     "password_reset": {
@@ -32,5 +32,28 @@
       "failed": 0
     }
   },
-  "recentLogs": []
+  "recentLogs": [
+    {
+      "id": "em_1790454999482_6vmmj",
+      "timestamp": "2026-09-26T20:36:39.481Z",
+      "recipient": "n***r@example.com",
+      "subject": "SteamFamily: Your verification code",
+      "purpose": "verify_email",
+      "status": "success",
+      "durationMs": 280,
+      "messageId": "<msg-102@smtp.brevo.com>",
+      "provider": "Brevo"
+    },
+    {
+      "id": "em_1790454993615_yp8qu",
+      "timestamp": "2026-09-26T20:36:33.615Z",
+      "recipient": "u***r@example.com",
+      "subject": "SteamFamily: Your login code",
+      "purpose": "2fa_login",
+      "status": "success",
+      "durationMs": 310,
+      "messageId": "<msg-101@smtp.brevo.com>",
+      "provider": "Brevo"
+    }
+  ]
 }

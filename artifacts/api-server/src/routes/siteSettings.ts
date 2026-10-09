@@ -353,8 +353,8 @@ router.put("/smtp", requireAdmin, async (req, res) => {
 // GET /site-settings/email-stats — admin only, get email statistics and logs
 router.get("/email-stats", requireAdmin, async (_req, res) => {
   try {
-    const { getEmailStats } = await import("../lib/emailStatsStore");
-    const stats = getEmailStats();
+    const { getEmailStatsAsync } = await import("../lib/emailStatsStore");
+    const stats = await getEmailStatsAsync();
     res.json({ success: true, stats });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || "Failed to load email statistics" });
@@ -365,7 +365,7 @@ router.get("/email-stats", requireAdmin, async (_req, res) => {
 router.post("/email-stats/reset", requireAdmin, async (_req, res) => {
   try {
     const { resetEmailStats } = await import("../lib/emailStatsStore");
-    const stats = resetEmailStats();
+    const stats = await resetEmailStats();
     res.json({ success: true, message: "Email statistics have been reset.", stats });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || "Failed to reset email statistics" });

@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Fragment, useState, useEffect, type ReactNode } from "react";
-import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles, Terminal, BarChart3, Activity, KeyRound, CheckCircle2, TrendingUp } from "lucide-react";
+import { Shield, Trash, Copy, Ban, CheckCircle, UserCheck, Flag, Coins, UserX, Megaphone, Pin, PinOff, Plus, ShoppingBag, Package, Star, Settings, Mail, Phone, MapPin, ExternalLink, X, Hourglass, Check, XCircle, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, Zap, ArrowLeft, Users, LayoutDashboard, Pencil, Gift, CheckCheck, Menu, RefreshCw, MessageSquare, Send, RotateCcw, DollarSign, AlertTriangle, MessageCircle, SlidersHorizontal, Save, Trophy, Clock, Sparkles, Terminal, BarChart3, Activity, KeyRound, CheckCircle2, TrendingUp, Download, Trash2, Filter } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MarkdownEditor } from "@/components/markdown-editor";
 
@@ -34,9 +34,19 @@ async function fetchDashboard() {
   }>;
 }
 
-function DashboardTab() {
+function DashboardTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { data, isLoading } = useQuery({ queryKey: ["admin-dashboard"], queryFn: fetchDashboard, refetchInterval: 120_000 });
   const [period, setPeriod] = useState<"24h" | "7d" | "30d">("7d");
+
+  const { data: emailStatsData } = useQuery({
+    queryKey: ["admin-email-stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/site-settings/email-stats", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load email statistics");
+      return res.json();
+    },
+    refetchInterval: 12000,
+  });
 
   if (isLoading) return <div className="text-muted-foreground text-sm py-8 text-center">Loading dashboard...</div>;
   if (!data) return <div className="text-muted-foreground text-sm py-8 text-center">No data</div>;
@@ -110,6 +120,54 @@ function DashboardTab() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={<Flag className="h-5 w-5" />} label="Total Reports" value={data.reports.total} sub="All-time submitted" />
           <StatCard icon={<Flag className="h-5 w-5" />} label="Open Reports" value={data.reports.open} sub="Needs attention" color={data.reports.open > 0 ? "text-red-500" : "text-emerald-500"} />
+        </div>
+      </section>
+
+      {/* Email & 2FA Deliveries */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold flex items-center gap-2">
+            <Mail className="h-4 w-4 text-primary" /> Email & 2FA Deliveries
+          </h3>
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate("email-analytics")}
+              className="text-xs text-primary hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+            >
+              <span>View Full Analytics & Logs</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            icon={<KeyRound className="h-5 w-5" />}
+            label="2FA Login Codes"
+            value={emailStatsData?.stats?.byPurpose?.["2fa_login"]?.total ?? 0}
+            sub={`${emailStatsData?.stats?.byPurpose?.["2fa_login"]?.success ?? 0} delivered`}
+            color="text-cyan-400"
+          />
+          <StatCard
+            icon={<CheckCircle2 className="h-5 w-5" />}
+            label="Verifications"
+            value={emailStatsData?.stats?.byPurpose?.["verify_email"]?.total ?? 0}
+            sub={`${emailStatsData?.stats?.byPurpose?.["verify_email"]?.success ?? 0} delivered`}
+            color="text-emerald-400"
+          />
+          <StatCard
+            icon={<Send className="h-5 w-5" />}
+            label="Total Dispatched"
+            value={emailStatsData?.stats?.totalSent ?? 0}
+            sub={`${emailStatsData?.stats?.successRate ?? 100}% delivery rate`}
+            color="text-primary"
+          />
+          <StatCard
+            icon={<Zap className="h-5 w-5" />}
+            label="Avg Latency"
+            value={`${emailStatsData?.stats?.avgDurationMs ?? 0}ms`}
+            sub="Server response"
+            color="text-purple-400"
+          />
         </div>
       </section>
     </div>
@@ -259,7 +317,31 @@ const BAN_DURATIONS = [
 export default function Admin() {
   const [, setLocation] = useLocation();
   const { data: user, isLoading: userLoading } = useGetMe();
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get("tab");
+        if (tabParam) return tabParam;
+        const saved = localStorage.getItem("steamfamily_admin_active_tab");
+        if (saved) return saved;
+      } catch {}
+    }
+    return "dashboard";
+  });
+
+  const setActiveTab = (newTab: string) => {
+    setActiveTabState(newTab);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("steamfamily_admin_active_tab", newTab);
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", newTab);
+        window.history.replaceState({}, "", url.toString());
+      } catch {}
+    }
+  };
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
   const isAdmin = !!user?.isAdmin;
@@ -497,7 +579,7 @@ export default function Admin() {
 
             {/* Tab Contents */}
             <div className="w-full">
-              {isAdmin && activeTab === "dashboard" && <DashboardTab />}
+              {isAdmin && activeTab === "dashboard" && <DashboardTab onNavigate={setActiveTab} />}
               {activeTab === "pending" && <PendingReviewTab />}
               {activeTab === "users" && <UsersTab isAdmin={isAdmin} />}
               {activeTab === "giveaways" && <GiveawayManagerTab isAdmin={isAdmin} />}
@@ -4172,12 +4254,29 @@ function EmailStatsSection() {
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const [cachedStats, setCachedStats] = useState<any>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("steamfamily_email_stats_cache");
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return null;
+  });
+
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["admin-email-stats"],
     queryFn: async () => {
       const res = await fetch("/api/site-settings/email-stats", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load email delivery statistics");
-      return res.json();
+      const json = await res.json();
+      if (json?.stats && typeof window !== "undefined") {
+        try {
+          localStorage.setItem("steamfamily_email_stats_cache", JSON.stringify(json.stats));
+          setCachedStats(json.stats);
+        } catch {}
+      }
+      return json;
     },
     refetchInterval: 12000,
   });
@@ -4193,6 +4292,12 @@ function EmailStatsSection() {
     },
     onSuccess: () => {
       setConfirmResetOpen(false);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("steamfamily_email_stats_cache");
+        } catch {}
+      }
+      setCachedStats(null);
       queryClient.invalidateQueries({ queryKey: ["admin-email-stats"] });
       toast({
         title: "Statistics Reset",
@@ -4208,7 +4313,7 @@ function EmailStatsSection() {
     },
   });
 
-  const stats = data?.stats;
+  const stats = data?.stats || cachedStats;
   const byPurpose = stats?.byPurpose || {
     "2fa_login": { total: 0, success: 0, failed: 0 },
     "verify_email": { total: 0, success: 0, failed: 0 },
@@ -4901,10 +5006,104 @@ function PremiumAdminTab() {
   const [premiumDiscountPercent, setPremiumDiscountPercent] = useState<number>(0);
   const premiumPricingInitialized = useState(false);
   const [codeGenTier, setCodeGenTier] = useState<"premium" | "pro">("premium");
-  const [codeGenDays, setCodeGenDays] = useState(30);
+  const [timePreset, setTimePreset] = useState<string>("1m");
+  const [timeValue, setTimeValue] = useState<number>(1);
+  const [timeUnit, setTimeUnit] = useState<"hours" | "days" | "weeks" | "months" | "years" | "lifetime">("months");
   const [codeGenMaxUses, setCodeGenMaxUses] = useState(1);
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
-  const [copiedCode, setCopiedCode] = useState(false);
+  const [codeGenCount, setCodeGenCount] = useState(1);
+  const [codePrefixType, setCodePrefixType] = useState<"vip" | "pro" | "none" | "custom">("vip");
+  const [customPrefix, setCustomPrefix] = useState("");
+  const [generatedBatch, setGeneratedBatch] = useState<any[]>([]);
+  const [copiedBatch, setCopiedBatch] = useState(false);
+  const [copiedSingleCode, setCopiedSingleCode] = useState<string | null>(null);
+  const [copiedActiveAll, setCopiedActiveAll] = useState(false);
+  const [codesFilter, setCodesFilter] = useState<"all" | "active" | "redeemed">("all");
+  const [codesSearch, setCodesSearch] = useState("");
+
+  // Grant time state
+  const [grantTimePreset, setGrantTimePreset] = useState<string>("1m");
+  const [grantTimeValue, setGrantTimeValue] = useState<number>(1);
+  const [grantTimeUnit, setGrantTimeUnit] = useState<"hours" | "days" | "months" | "lifetime">("months");
+
+  const calculateDuration = () => {
+    if (timeUnit === "lifetime") {
+      return { durationHours: 876000, days: 36500, label: "Lifetime" };
+    }
+    let hours = timeValue;
+    if (timeUnit === "days") hours = timeValue * 24;
+    else if (timeUnit === "weeks") hours = timeValue * 24 * 7;
+    else if (timeUnit === "months") hours = timeValue * 24 * 30;
+    else if (timeUnit === "years") hours = timeValue * 24 * 365;
+
+    hours = Math.max(1, Math.floor(hours));
+    const days = Math.max(1, Math.ceil(hours / 24));
+    let label = `${timeValue} ${timeUnit}`;
+    if (timeValue === 1 && label.endsWith("s")) label = label.slice(0, -1);
+    return { durationHours: hours, days, label };
+  };
+
+  const calculateGrantDuration = () => {
+    if (grantTimeUnit === "lifetime") {
+      return { durationHours: 876000, days: 36500, label: "Lifetime" };
+    }
+    let hours = grantTimeValue;
+    if (grantTimeUnit === "days") hours = grantTimeValue * 24;
+    else if (grantTimeUnit === "months") hours = grantTimeValue * 24 * 30;
+
+    hours = Math.max(1, Math.floor(hours));
+    const days = Math.max(1, Math.ceil(hours / 24));
+    let label = `${grantTimeValue} ${grantTimeUnit}`;
+    if (grantTimeValue === 1 && label.endsWith("s")) label = label.slice(0, -1);
+    return { durationHours: hours, days, label };
+  };
+
+  const copyAllBatchKeys = () => {
+    if (generatedBatch.length === 0) return;
+    const text = generatedBatch.map((k) => k.code).join("\n");
+    navigator.clipboard.writeText(text);
+    setCopiedBatch(true);
+    setTimeout(() => setCopiedBatch(false), 2500);
+    toast({ title: "Copied to clipboard!", description: `All ${generatedBatch.length} keys copied.` });
+  };
+
+  const downloadBatchTxt = () => {
+    if (generatedBatch.length === 0) return;
+    const { label } = calculateDuration();
+    const filename = `vip_keys_${codeGenTier}_${label.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${generatedBatch.length}keys.txt`;
+
+    const lines = [
+      `================================================`,
+      ` STEAMSHARE VIP REDEEM KEYS`,
+      ` Tier: ${codeGenTier === "pro" ? "Pro VIP (Diamond)" : "VIP Premium (Gold)"}`,
+      ` Duration: ${label}`,
+      ` Max Uses: ${codeGenMaxUses} use per key`,
+      ` Generated: ${new Date().toLocaleString()}`,
+      ` Total Keys: ${generatedBatch.length}`,
+      `================================================`,
+      ``,
+      ...generatedBatch.map((k) => `${k.code}`),
+      ``,
+      `Redeem at: ${window.location.origin}/premium`,
+    ];
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({ title: "Downloaded .txt file", description: filename });
+  };
+
+  const copySingleKey = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedSingleCode(code);
+    setTimeout(() => setCopiedSingleCode(null), 2000);
+    toast({ title: "Key copied", description: code });
+  };
 
   // Server-side user search for grant/revoke (finds any user, not just first 50)
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -4981,20 +5180,43 @@ function PremiumAdminTab() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const generateCodeMutation = useMutation({
+  const generateCodesMutation = useMutation({
     mutationFn: async () => {
+      const { durationHours, days, label } = calculateDuration();
+      let prefix: string | undefined = undefined;
+      if (codePrefixType === "vip") prefix = "VIP";
+      else if (codePrefixType === "pro") prefix = "PRO";
+      else if (codePrefixType === "custom" && customPrefix.trim()) prefix = customPrefix.trim();
+
       const res = await fetch("/api/premium/generate-code", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: codeGenTier, days: codeGenDays, maxUses: codeGenMaxUses }),
+        body: JSON.stringify({
+          tier: codeGenTier,
+          days,
+          durationHours,
+          durationLabel: label,
+          maxUses: codeGenMaxUses,
+          count: codeGenCount,
+          prefix,
+        }),
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed"); }
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || "Failed to generate keys");
+      }
       return res.json();
     },
     onSuccess: (data: any) => {
-      setGeneratedCode(data.code);
+      const list = data.codes || (data.code ? [data] : []);
+      setGeneratedBatch(list);
       refetchCodes();
+      const count = list.length;
+      toast({
+        title: `🎉 Generated ${count} VIP ${count === 1 ? "Key" : "Keys"}!`,
+        description: `${codeGenTier === "pro" ? "💎 Pro VIP" : "⭐ VIP Premium"} • ${calculateDuration().label}`,
+      });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -5005,7 +5227,17 @@ function PremiumAdminTab() {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    onSuccess: () => { refetchCodes(); toast({ title: "Code deactivated" }); },
+    onSuccess: () => { refetchCodes(); toast({ title: "Key deactivated" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteCodeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/premium/codes/${id}/delete`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    onSuccess: () => { refetchCodes(); toast({ title: "Key permanently deleted" }); },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -5013,21 +5245,22 @@ function PremiumAdminTab() {
 
   const grantMutation = useMutation({
     mutationFn: async () => {
+      const { durationHours, days, label } = calculateGrantDuration();
       const res = await fetch("/api/premium/grant", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: selectedUser.id, tier: grantTier, days: grantDays }),
+        body: JSON.stringify({ userId: selectedUser.id, tier: grantTier, days, durationHours }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed"); }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       queryClient.invalidateQueries({ queryKey: ["admin-premium-users"] });
-      toast({ title: `✨ ${grantTier === "pro" ? "Pro" : "Premium"} granted to ${selectedUser.username} for ${grantDays} days` });
-      const expiresAt = new Date(Date.now() + grantDays * 24 * 60 * 60 * 1000).toISOString();
-      setSelectedUser((u: any) => ({ ...u, premiumTier: grantTier, premiumExpiresAt: expiresAt }));
+      const { label } = calculateGrantDuration();
+      toast({ title: `✨ ${grantTier === "pro" ? "Pro VIP" : "VIP"} granted to ${selectedUser.username} for ${label}` });
+      setSelectedUser((u: any) => ({ ...u, premiumTier: grantTier, premiumExpiresAt: data.expiresAt }));
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -5075,72 +5308,483 @@ function PremiumAdminTab() {
   return (
     <div className="space-y-6">
 
-      {/* Code Generator */}
-      <div className="bg-card border border-primary/20 rounded-xl p-6 space-y-5">
-        <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-          <Gift className="h-5 w-5 text-primary" /> Redeem Code Generator
-        </h3>
-        <p className="text-sm text-muted-foreground">Generate single-use or multi-use codes to gift premium access to users.</p>
+      {/* VIP & Redeem Key Generator */}
+      <div className="bg-card border border-primary/30 rounded-xl p-6 space-y-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/60 pb-4">
+          <div>
+            <h3 className="font-bold text-foreground text-lg flex items-center gap-2">
+              <Gift className="h-5 w-5 text-primary" /> VIP & Redeem Key Generator
+            </h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Generate single or multiple batch keys with custom duration, prefixes, and uses.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary font-medium flex items-center gap-1.5">
+              <KeyRound className="h-3.5 w-3.5" /> Batch & Custom Time Ready
+            </span>
+          </div>
+        </div>
 
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Tier</p>
-            <div className="flex gap-2">
-              <button onClick={() => setCodeGenTier("premium")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "premium" ? "border-yellow-500 bg-yellow-500/10 text-yellow-400" : "border-border text-muted-foreground hover:text-foreground"}`}>⭐ Premium</button>
-              <button onClick={() => setCodeGenTier("pro")} className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${codeGenTier === "pro" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-border text-muted-foreground hover:text-foreground"}`}>💎 Pro</button>
+        {/* Generator Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* 1. VIP Tier */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+              1. VIP Tier
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCodeGenTier("premium")}
+                className={`px-3 py-2.5 rounded-lg border text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                  codeGenTier === "premium"
+                    ? "border-yellow-500 bg-yellow-500/15 text-yellow-400 shadow-sm"
+                    : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
+              >
+                <span>⭐</span> VIP Premium
+              </button>
+              <button
+                type="button"
+                onClick={() => setCodeGenTier("pro")}
+                className={`px-3 py-2.5 rounded-lg border text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                  codeGenTier === "pro"
+                    ? "border-blue-500 bg-blue-500/15 text-blue-400 shadow-sm"
+                    : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
+              >
+                <span>💎</span> Pro VIP
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {codeGenTier === "pro" ? "Diamond badge, animated name colors, priority claims" : "Gold star badge, 16 premium colors, VIP access"}
+            </p>
+          </div>
+
+          {/* 2. Key Quantity */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+              2. Quantity (Batch)
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                value={codeGenCount}
+                onChange={(e) => setCodeGenCount(Math.max(1, Math.min(500, Number(e.target.value))))}
+                className="w-24 h-10 font-mono text-center font-bold text-base"
+              />
+              <div className="flex flex-wrap gap-1 flex-1">
+                {[1, 5, 10, 25, 50, 100].map((qty) => (
+                  <button
+                    key={qty}
+                    type="button"
+                    onClick={() => setCodeGenCount(qty)}
+                    className={`px-2 py-1 text-xs rounded border transition-colors font-medium ${
+                      codeGenCount === qty
+                        ? "border-primary bg-primary/20 text-primary font-bold"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                    }`}
+                  >
+                    {qty}x
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Generating <span className="font-semibold text-foreground">{codeGenCount}</span> {codeGenCount === 1 ? "key" : "keys"} at once
+            </p>
+          </div>
+
+          {/* 3. Duration & Choose Time */}
+          <div className="space-y-2 lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                3. Choose Duration / Time
+              </label>
+              <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                {calculateDuration().label}
+              </span>
+            </div>
+
+            {/* Quick Time Presets: Only 1m and 1y */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "1m", label: "🌙 1m (1 Month)", value: 1, unit: "months" },
+                { id: "1y", label: "🏆 1y (1 Year)", value: 1, unit: "years" },
+              ].map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setTimePreset(preset.id);
+                    setTimeValue(preset.value);
+                    setTimeUnit(preset.unit as any);
+                  }}
+                  className={`px-3 py-1.5 text-xs rounded-md border transition-all font-semibold ${
+                    timePreset === preset.id
+                      ? "border-primary bg-primary/20 text-primary font-bold shadow-sm"
+                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Time Controls */}
+            <div className="flex items-center gap-2 pt-1">
+              <Input
+                type="number"
+                min={1}
+                max={timeUnit === "lifetime" ? 1 : 999}
+                value={timeUnit === "lifetime" ? 1 : timeValue}
+                disabled={timeUnit === "lifetime"}
+                onChange={(e) => {
+                  setTimeValue(Math.max(1, Number(e.target.value)));
+                  setTimePreset("custom");
+                }}
+                className="w-24 h-9 font-mono text-center font-bold"
+              />
+              <select
+                value={timeUnit}
+                onChange={(e) => {
+                  setTimeUnit(e.target.value as any);
+                  setTimePreset("custom");
+                }}
+                className="h-9 px-3 text-xs rounded-md bg-background border border-input text-foreground font-medium"
+              >
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+                <option value="weeks">Weeks</option>
+                <option value="months">Months (30d)</option>
+                <option value="years">Years (365d)</option>
+                <option value="lifetime">Lifetime (Permanent)</option>
+              </select>
+              <span className="text-xs text-muted-foreground hidden sm:inline">
+                ({calculateDuration().durationHours} total hours)
+              </span>
             </div>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Duration (days)</p>
-            <div className="flex gap-2 items-center">
-              <Input type="number" min={1} max={365} value={codeGenDays} onChange={(e) => setCodeGenDays(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
-              <Button variant="outline" size="sm" onClick={() => setCodeGenDays(30)} className="h-9 px-2 text-xs">30d</Button>
-              <Button variant="outline" size="sm" onClick={() => setCodeGenDays(365)} className="h-9 px-2 text-xs border-primary/50 text-primary hover:bg-primary/10">1 Year</Button>
+        </div>
+
+        {/* Format, Uses, & Generate Button */}
+        <div className="flex flex-wrap items-end justify-between gap-4 pt-3 border-t border-border/40">
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Key Prefix */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+                Key Prefix
+              </p>
+              <div className="flex items-center gap-1.5">
+                {(["vip", "pro", "none", "custom"] as const).map((pType) => (
+                  <button
+                    key={pType}
+                    type="button"
+                    onClick={() => setCodePrefixType(pType)}
+                    className={`px-2.5 py-1 text-xs rounded border transition-colors font-medium uppercase ${
+                      codePrefixType === pType
+                        ? "border-primary bg-primary/20 text-primary font-bold"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {pType === "none" ? "None" : pType}
+                  </button>
+                ))}
+                {codePrefixType === "custom" && (
+                  <Input
+                    placeholder="PREFIX"
+                    value={customPrefix}
+                    onChange={(e) => setCustomPrefix(e.target.value.toUpperCase())}
+                    className="w-28 h-8 font-mono text-xs uppercase"
+                    maxLength={8}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Max Uses */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+                Uses Per Key
+              </p>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={codeGenMaxUses}
+                  onChange={(e) => setCodeGenMaxUses(Math.max(1, Number(e.target.value)))}
+                  className="w-20 h-8 font-mono text-center text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCodeGenMaxUses(1)}
+                  className={`px-2 py-1 text-xs rounded border ${codeGenMaxUses === 1 ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border text-muted-foreground"}`}
+                >
+                  Single Use
+                </button>
+              </div>
             </div>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">Max uses</p>
-            <Input type="number" min={1} max={1000} value={codeGenMaxUses} onChange={(e) => setCodeGenMaxUses(Math.max(1, Number(e.target.value)))} className="w-24 h-9 font-mono text-center" />
-          </div>
-          <Button onClick={() => generateCodeMutation.mutate()} disabled={generateCodeMutation.isPending} className="bg-primary hover:bg-primary/90 h-9">
-            {generateCodeMutation.isPending ? "Generating..." : "Generate Code"}
+
+          {/* Main Generate Button */}
+          <Button
+            onClick={() => generateCodesMutation.mutate()}
+            disabled={generateCodesMutation.isPending}
+            className="h-10 px-6 font-bold shadow-md bg-primary hover:bg-primary/90 text-primary-foreground flex items-center gap-2"
+          >
+            {generateCodesMutation.isPending ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" /> Generating Keys...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" /> Generate {codeGenCount} {codeGenTier === "pro" ? "Pro VIP" : "VIP"} {codeGenCount === 1 ? "Key" : "Keys"}
+              </>
+            )}
           </Button>
         </div>
 
-        {generatedCode && (
-          <div className="bg-primary/10 border border-primary/30 rounded-lg px-4 py-3 flex items-center gap-3">
-            <code className="font-mono text-primary font-bold text-lg tracking-widest flex-1">{generatedCode}</code>
-            <button
-              onClick={() => { navigator.clipboard.writeText(generatedCode); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
-              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              title="Copy code"
-            >
-              {copiedCode ? <CheckCheck className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
-            </button>
-          </div>
-        )}
+        {/* Generated Batch Keys Showcase */}
+        {generatedBatch.length > 0 && (
+          <div className="bg-primary/5 border border-primary/40 rounded-xl p-5 space-y-4 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-foreground text-sm flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-400" />
+                  Successfully Generated {generatedBatch.length} {generatedBatch.length === 1 ? "Key" : "Keys"}!
+                </h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Tier: <span className="font-semibold text-foreground uppercase">{codeGenTier}</span> • Duration: <span className="font-semibold text-foreground">{calculateDuration().label}</span> • Uses: <span className="font-semibold text-foreground">{codeGenMaxUses}x per key</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={copyAllBatchKeys}
+                  className="h-8 text-xs font-semibold gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+                >
+                  {copiedBatch ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedBatch ? "Copied All!" : `Copy All (${generatedBatch.length})`}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={downloadBatchTxt}
+                  className="h-8 text-xs font-semibold gap-1.5"
+                >
+                  <Download className="h-3.5 w-3.5" /> Download .txt
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setGeneratedBatch([])}
+                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                  title="Close batch view"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
-        {/* Codes list */}
-        {(codes as any[]).length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Codes</p>
-            <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border max-h-56 overflow-y-auto">
-              {(codes as any[]).map((c: any) => (
-                <div key={c.id} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${!c.is_active ? "opacity-40" : ""}`}>
-                  <code className="font-mono font-bold text-primary flex-1 text-xs">{c.code}</code>
-                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${c.tier === "pro" ? "bg-blue-500/20 text-blue-400" : "bg-yellow-500/20 text-yellow-400"}`}>{c.tier}</span>
-                  <span className="text-xs text-muted-foreground">{c.days}d</span>
-                  <span className="text-xs text-muted-foreground">{c.uses_count}/{c.max_uses}</span>
-                  {c.is_active && (
-                    <button onClick={() => deactivateCodeMutation.mutate(c.id)} className="text-destructive hover:text-destructive/80 transition-colors ml-1" title="Deactivate">
-                      <X className="h-3.5 w-3.5" />
+            {/* Scrollable Keys Box */}
+            <div className="bg-background/90 border border-border/80 rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {generatedBatch.map((item, idx) => (
+                  <div
+                    key={item.id || item.code || idx}
+                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border/60 hover:border-primary/40 transition-colors"
+                  >
+                    <div className="min-w-0 flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-muted-foreground">#{idx + 1}</span>
+                      <code className="font-mono font-bold text-xs text-primary truncate select-all">
+                        {item.code}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copySingleKey(item.code)}
+                      className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted transition-colors shrink-0"
+                      title="Copy key"
+                    >
+                      {copiedSingleCode === item.code ? (
+                        <Check className="h-3.5 w-3.5 text-green-400" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
                     </button>
-                  )}
-                </div>
-              ))}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
+
+        {/* Existing & Active Codes Manager */}
+        <div className="space-y-3 pt-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Keys Database ({((codes as any[]) || []).length})
+              </p>
+              <div className="flex items-center gap-1">
+                {(["all", "active", "redeemed"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setCodesFilter(filter)}
+                    className={`px-2 py-0.5 text-[11px] rounded font-medium capitalize transition-colors ${
+                      codesFilter === filter
+                        ? "bg-primary/20 text-primary font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {filter}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Search keys..."
+                value={codesSearch}
+                onChange={(e) => setCodesSearch(e.target.value)}
+                className="w-40 sm:w-48 h-8 text-xs"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const active = (codes as any[]).filter((c) => c.isActive ?? c.is_active);
+                  if (active.length === 0) {
+                    toast({ title: "No active keys", description: "No active keys to copy." });
+                    return;
+                  }
+                  navigator.clipboard.writeText(active.map((c) => c.code).join("\n"));
+                  setCopiedActiveAll(true);
+                  setTimeout(() => setCopiedActiveAll(false), 2000);
+                  toast({ title: "Copied!", description: `${active.length} active keys copied.` });
+                }}
+                className="h-8 text-xs px-2.5 font-medium gap-1"
+                title="Copy all currently active keys"
+              >
+                {copiedActiveAll ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                Copy Active
+              </Button>
+            </div>
+          </div>
+
+          {/* Codes List Table */}
+          {((codes as any[]) || []).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6 bg-muted/20 border border-border rounded-lg">
+              No keys generated yet. Use the generator above to create your first VIP keys!
+            </p>
+          ) : (
+            <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border max-h-72 overflow-y-auto">
+              {(codes as any[])
+                .filter((c: any) => {
+                  const isActive = c.isActive ?? c.is_active;
+                  if (codesFilter === "active" && !isActive) return false;
+                  if (codesFilter === "redeemed" && isActive) return false;
+                  if (codesSearch.trim()) {
+                    const q = codesSearch.toLowerCase();
+                    return c.code.toLowerCase().includes(q) || c.tier.toLowerCase().includes(q);
+                  }
+                  return true;
+                })
+                .map((c: any) => {
+                  const isActive = c.isActive ?? c.is_active;
+                  const usesCount = c.usesCount ?? c.uses_count ?? 0;
+                  const maxUses = c.maxUses ?? c.max_uses ?? 1;
+                  const durationDisplay = c.durationLabel || (c.durationHours ? (c.durationHours < 24 ? `${c.durationHours}h` : `${Math.round(c.durationHours / 24)}d`) : `${c.days}d`);
+
+                  return (
+                    <div
+                      key={c.id}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40 ${
+                        !isActive ? "opacity-50" : ""
+                      }`}
+                    >
+                      <code className="font-mono font-bold text-primary text-xs tracking-wider select-all">
+                        {c.code}
+                      </code>
+
+                      <button
+                        type="button"
+                        onClick={() => copySingleKey(c.code)}
+                        className="text-muted-foreground hover:text-foreground p-1 transition-colors"
+                        title="Copy key"
+                      >
+                        {copiedSingleCode === c.code ? (
+                          <Check className="h-3.5 w-3.5 text-green-400" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded font-semibold capitalize ${
+                          c.tier === "pro"
+                            ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                            : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                        }`}
+                      >
+                        {c.tier === "pro" ? "💎 Pro VIP" : "⭐ Premium"}
+                      </span>
+
+                      <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                        ⏱️ {durationDisplay}
+                      </span>
+
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {usesCount} / {maxUses} uses
+                      </span>
+
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                          isActive
+                            ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {isActive ? "Active" : "Redeemed"}
+                      </span>
+
+                      <div className="flex items-center gap-1 shrink-0 ml-1">
+                        {isActive && (
+                          <button
+                            type="button"
+                            onClick={() => deactivateCodeMutation.mutate(c.id)}
+                            className="text-muted-foreground hover:text-amber-400 p-1 rounded transition-colors"
+                            title="Deactivate key"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Delete key ${c.code}?`)) {
+                              deleteCodeMutation.mutate(c.id);
+                            }
+                          }}
+                          className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
+                          title="Permanently delete key"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Active Premium Users */}
@@ -5249,15 +5893,46 @@ function PremiumAdminTab() {
                 </div>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground mb-1.5 font-medium">Duration (days)</p>
-                <Input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={grantDays}
-                  onChange={(e) => setGrantDays(Math.max(1, Number(e.target.value)))}
-                  className="w-24 h-9 font-mono text-center"
-                />
+                <p className="text-xs text-muted-foreground mb-1.5 font-medium">Duration ({calculateGrantDuration().label})</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={grantTimeUnit === "lifetime" ? 1 : 999}
+                    value={grantTimeUnit === "lifetime" ? 1 : grantTimeValue}
+                    disabled={grantTimeUnit === "lifetime"}
+                    onChange={(e) => {
+                      setGrantTimeValue(Math.max(1, Number(e.target.value)));
+                      setGrantTimePreset("custom");
+                    }}
+                    className="w-20 h-9 font-mono text-center"
+                  />
+                  <select
+                    value={grantTimeUnit}
+                    onChange={(e) => {
+                      setGrantTimeUnit(e.target.value as any);
+                      setGrantTimePreset("custom");
+                    }}
+                    className="h-9 px-2 text-xs rounded-md bg-background border border-input text-foreground"
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="months">Months</option>
+                    <option value="lifetime">Lifetime</option>
+                  </select>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setGrantTimePreset("1m"); setGrantTimeValue(1); setGrantTimeUnit("months"); }}
+                      className={`px-2.5 py-1 text-xs rounded border font-semibold ${grantTimePreset === "1m" ? "border-primary bg-primary/20 text-primary font-bold" : "border-border text-muted-foreground hover:text-foreground"}`}
+                    >🌙 1m</button>
+                    <button
+                      type="button"
+                      onClick={() => { setGrantTimePreset("1y"); setGrantTimeValue(1); setGrantTimeUnit("years"); }}
+                      className={`px-2.5 py-1 text-xs rounded border font-semibold ${grantTimePreset === "1y" ? "border-primary bg-primary/20 text-primary font-bold" : "border-border text-muted-foreground hover:text-foreground"}`}
+                    >🏆 1y</button>
+                  </div>
+                </div>
               </div>
               <div className="flex gap-2">
                 <Button

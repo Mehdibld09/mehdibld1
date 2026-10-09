@@ -4,6 +4,15 @@ import { db, usersTable, siteSettingsTable, premiumCodesTable } from "@workspace
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { getSetting, getAllXpSettings } from "../lib/settings";
+import {
+  getAllCodes,
+  createCodesBatch,
+  findCode,
+  recordCodeRedemption,
+  deactivateCodeById,
+  deleteCodeById,
+  formatDurationLabel,
+} from "../lib/premiumCodesStore";
 
 const router = express.Router();
 
@@ -103,9 +112,15 @@ router.post("/buy-points", requireAuth, async (req, res) => {
 
 // POST /premium/grant — admin grant premium or pro to a user
 router.post("/grant", requireAdmin, async (req, res) => {
-  const { userId, tier, days } = req.body as { userId: number; tier: "premium" | "pro"; days?: number };
+  const { userId, tier, days, durationHours } = req.body as {
+    userId: number;
+    tier: "premium" | "pro";
+    days?: number;
+    durationHours?: number;
+  };
   if (!userId || !tier) { res.status(400).json({ error: "userId and tier required" }); return; }
-  const duration = (days ?? 30) * 24 * 60 * 60 * 1000;
+  const totalHours = durationHours ? Math.max(1, Number(durationHours)) : (days ?? 30) * 24;
+  const duration = totalHours * 60 * 60 * 1000;
   const expiresAt = new Date(Date.now() + duration);
 
   await db.update(usersTable).set({ premiumTier: tier, premiumExpiresAt: expiresAt })
@@ -172,31 +187,116 @@ router.patch("/preferences", requireAuth, async (req, res) => {
 
 // GET /premium/codes — admin list all codes
 router.get("/codes", requireAdmin, async (_req, res) => {
-  const rows = await db.select().from(premiumCodesTable).orderBy(sql`${premiumCodesTable.createdAt} DESC`).limit(200);
-  res.json(rows);
+  const codes = await getAllCodes();
+  res.json(codes);
 });
 
-// POST /premium/generate-code — admin generate a code
+// POST /premium/generate-code — admin generate single or multiple codes
 router.post("/generate-code", requireAdmin, async (req, res) => {
-  const { tier = "premium", days = 30, maxUses = 1 } = req.body as { tier?: string; days?: number; maxUses?: number };
-  if (!["premium", "pro"].includes(tier)) { res.status(400).json({ error: "Invalid tier" }); return; }
-  const seg = () => Math.random().toString(36).substring(2, 6).toUpperCase();
-  const code = `${seg()}-${seg()}-${seg()}`;
-  const [row] = await db.insert(premiumCodesTable).values({
-    code,
+  const {
+    tier = "premium",
+    days = 30,
+    durationHours,
+    durationLabel,
+    maxUses = 1,
+    count = 1,
+    prefix,
+  } = req.body as {
+    tier?: string;
+    days?: number;
+    durationHours?: number;
+    durationLabel?: string;
+    maxUses?: number;
+    count?: number;
+    prefix?: string;
+  };
+
+  if (!["premium", "pro"].includes(tier)) {
+    res.status(400).json({ error: "Invalid tier" });
+    return;
+  }
+
+  const generatedList = await createCodesBatch({
     tier: tier as "premium" | "pro",
-    days: Math.max(1, Math.floor(Number(days))),
-    maxUses: Math.max(1, Math.floor(Number(maxUses))),
-  }).returning();
-  res.json(row);
+    days: Number(days) || 30,
+    durationHours: durationHours ? Number(durationHours) : undefined,
+    durationLabel,
+    maxUses: Number(maxUses) || 1,
+    count: Number(count) || 1,
+    prefix,
+  });
+
+  if (generatedList.length === 1) {
+    res.json({
+      ...generatedList[0],
+      codes: generatedList,
+      count: 1,
+    });
+  } else {
+    res.json({
+      codes: generatedList,
+      count: generatedList.length,
+      message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "Pro VIP" : "VIP"} keys!`,
+    });
+  }
+});
+
+// POST /premium/generate-batch — admin generate batch of multiple codes
+router.post("/generate-batch", requireAdmin, async (req, res) => {
+  const {
+    tier = "premium",
+    days = 30,
+    durationHours,
+    durationLabel,
+    maxUses = 1,
+    count = 10,
+    prefix,
+  } = req.body as {
+    tier?: string;
+    days?: number;
+    durationHours?: number;
+    durationLabel?: string;
+    maxUses?: number;
+    count?: number;
+    prefix?: string;
+  };
+
+  if (!["premium", "pro"].includes(tier)) {
+    res.status(400).json({ error: "Invalid tier" });
+    return;
+  }
+
+  const generatedList = await createCodesBatch({
+    tier: tier as "premium" | "pro",
+    days: Number(days) || 30,
+    durationHours: durationHours ? Number(durationHours) : undefined,
+    durationLabel,
+    maxUses: Number(maxUses) || 1,
+    count: Number(count) || 1,
+    prefix,
+  });
+
+  res.json({
+    codes: generatedList,
+    count: generatedList.length,
+    message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "Pro VIP" : "VIP"} keys!`,
+  });
 });
 
 // DELETE /premium/codes/:id — admin deactivate a code
 router.delete("/codes/:id", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  await db.update(premiumCodesTable).set({ isActive: false }).where(eq(premiumCodesTable.id, id));
+  await deactivateCodeById(id);
   res.json({ message: "Code deactivated" });
+});
+
+// POST /premium/codes/:id/delete — admin permanently delete a code
+router.post("/codes/:id/delete", requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  await deleteCodeById(id);
+  res.json({ message: "Code deleted" });
 });
 
 // POST /premium/redeem — user redeem a code
@@ -206,12 +306,7 @@ router.post("/redeem", requireAuth, async (req, res) => {
   if (!code || typeof code !== "string") { res.status(400).json({ error: "Code required" }); return; }
 
   const sanitized = code.toUpperCase().trim();
-  // Use parameterized ORM query — no string interpolation, no SQL injection risk
-  const [premCode] = await db
-    .select()
-    .from(premiumCodesTable)
-    .where(eq(premiumCodesTable.code, sanitized))
-    .limit(1);
+  const premCode = await findCode(sanitized);
 
   if (!premCode) { res.status(404).json({ error: "Invalid or unknown code" }); return; }
   if (!premCode.isActive) { res.status(400).json({ error: "This code is no longer active" }); return; }
@@ -220,24 +315,27 @@ router.post("/redeem", requireAuth, async (req, res) => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-  const duration = premCode.days * 24 * 60 * 60 * 1000;
-  // Only preserve Pro if the user currently has an *active* Pro subscription.
-  // An expired premiumTier="pro" must not silently upgrade a Premium code redeem.
+  const durationMs = (premCode.durationHours && premCode.durationHours > 0)
+    ? premCode.durationHours * 60 * 60 * 1000
+    : (premCode.days || 30) * 24 * 60 * 60 * 1000;
+
   const userHasActivePro = isActivePremium(user) && user.premiumTier === "pro";
   const newTier = premCode.tier === "pro" ? "pro" : (userHasActivePro ? "pro" : "premium");
 
-  // Redeem codes always start fresh from now — never stack on existing subscription.
-  const expiresAt = new Date(Date.now() + duration);
-  const newUsesCount = premCode.usesCount + 1;
-  await db.update(usersTable).set({ premiumTier: newTier, premiumExpiresAt: expiresAt }).where(eq(usersTable.id, userId));
-  await db.update(premiumCodesTable)
-    .set({
-      usesCount: sql`${premiumCodesTable.usesCount} + 1`,
-      isActive: newUsesCount >= premCode.maxUses ? false : premCode.isActive,
-    })
-    .where(eq(premiumCodesTable.id, premCode.id));
+  // If user has active subscription of same tier, extend cleanly
+  const hasActiveSameTier = isActivePremium(user) && user.premiumTier === newTier && user.premiumExpiresAt;
+  const baseTime = hasActiveSameTier ? new Date(user.premiumExpiresAt).getTime() : Date.now();
+  const expiresAt = new Date(baseTime + durationMs);
 
-  res.json({ message: `${newTier === "pro" ? "Pro" : "Premium"} activated for ${premCode.days} days!`, tier: newTier, expiresAt });
+  await db.update(usersTable).set({ premiumTier: newTier, premiumExpiresAt: expiresAt }).where(eq(usersTable.id, userId));
+  await recordCodeRedemption(premCode.id);
+
+  const durationText = premCode.durationLabel || formatDurationLabel(premCode.durationHours || premCode.days * 24);
+  res.json({
+    message: `🎉 ${newTier === "pro" ? "Pro VIP" : "VIP"} activated for ${durationText}!`,
+    tier: newTier,
+    expiresAt,
+  });
 });
 
 export default router;

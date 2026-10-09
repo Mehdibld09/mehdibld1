@@ -98,7 +98,7 @@ export async function sendEmail(
     const err = new Error("SMTP is not configured. Please set your SMTP Host, Username, and Password in the admin panel under Site Settings → Email (SMTP).");
     log(`[ERROR] Configuration check failed: Host="${cfg.smtp_host || 'MISSING'}", User="${cfg.smtp_user || 'MISSING'}", Pass="${cfg.smtp_pass ? 'PRESENT' : 'MISSING'}"`);
     (err as any).logs = logs;
-    recordEmailEvent({
+    await recordEmailEvent({
       recipient: to,
       subject,
       purpose: effectivePurpose,
@@ -183,7 +183,7 @@ export async function sendEmail(
         logs,
       };
 
-      recordEmailEvent({
+      await recordEmailEvent({
         recipient: to,
         subject,
         purpose: effectivePurpose,
@@ -237,7 +237,7 @@ export async function sendEmail(
 
   log(`[FAILURE] ${userFriendlyMsg}`);
 
-  recordEmailEvent({
+  await recordEmailEvent({
     recipient: to,
     subject,
     purpose: effectivePurpose,
