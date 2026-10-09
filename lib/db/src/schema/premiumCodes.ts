@@ -10,6 +10,9 @@ export const premiumCodesTable = pgTable("premium_codes", {
   maxUses: integer("max_uses").notNull().default(1),
   usesCount: integer("uses_count").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
+  usedByUsername: text("used_by_username"),
+  usedByUserId: integer("used_by_user_id"),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

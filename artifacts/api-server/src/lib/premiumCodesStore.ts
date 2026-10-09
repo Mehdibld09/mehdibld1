@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "crypto";
-import { db, premiumCodesTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { db, pool, premiumCodesTable, siteSettingsTable } from "@workspace/db";
+import { eq, or, desc } from "drizzle-orm";
 
 export interface StoredCode {
   id: number;
@@ -14,15 +14,24 @@ export interface StoredCode {
   maxUses: number;
   usesCount: number;
   isActive: boolean;
+  isActivated: boolean;
+  usedByUsername?: string | null;
+  usedByUserId?: number | null;
+  activatedAt?: string | null;
   createdAt: string;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const CODES_FILE = path.join(DATA_DIR, "premium-codes.json");
+const DB_SETTINGS_KEY = "premium_vip_keys_db";
 
 function ensureDirectoryExists() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.warn("[premiumCodesStore] Error creating data dir:", err);
   }
 }
 
@@ -33,7 +42,11 @@ export function loadCodesFromFile(): StoredCode[] {
       const content = fs.readFileSync(CODES_FILE, "utf-8");
       const parsed = JSON.parse(content);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return parsed.map((c) => ({
+          ...c,
+          isActivated: Boolean(c.isActivated || (c.usesCount || c.uses_count || 0) > 0),
+          isActive: c.isActive !== false && c.is_active !== false,
+        }));
       }
     }
   } catch (err) {
@@ -51,8 +64,47 @@ export function saveCodesToFile(codes: StoredCode[]): void {
   }
 }
 
+let dbTableEnsured = false;
+
+export async function ensureDbTableExists(): Promise<void> {
+  if (dbTableEnsured) return;
+  if (!process.env.DATABASE_URL) {
+    dbTableEnsured = true;
+    return;
+  }
+  try {
+    if (pool && typeof pool.query === "function") {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS premium_codes (
+          id SERIAL PRIMARY KEY,
+          code TEXT NOT NULL UNIQUE,
+          tier TEXT NOT NULL DEFAULT 'premium',
+          days INTEGER NOT NULL DEFAULT 30,
+          duration_hours INTEGER,
+          duration_label TEXT,
+          max_uses INTEGER NOT NULL DEFAULT 1,
+          uses_count INTEGER NOT NULL DEFAULT 0,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          used_by_username TEXT,
+          used_by_user_id INTEGER,
+          activated_at TIMESTAMP WITH TIME ZONE,
+          created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+        );
+        ALTER TABLE premium_codes ADD COLUMN IF NOT EXISTS duration_hours INTEGER;
+        ALTER TABLE premium_codes ADD COLUMN IF NOT EXISTS duration_label TEXT;
+        ALTER TABLE premium_codes ADD COLUMN IF NOT EXISTS used_by_username TEXT;
+        ALTER TABLE premium_codes ADD COLUMN IF NOT EXISTS used_by_user_id INTEGER;
+        ALTER TABLE premium_codes ADD COLUMN IF NOT EXISTS activated_at TIMESTAMP WITH TIME ZONE;
+      `);
+    }
+    dbTableEnsured = true;
+  } catch (err: any) {
+    console.warn("[premiumCodesStore] ensureDbTableExists warning:", err?.message || err);
+  }
+}
+
 export function generateRandomCode(prefix?: string): string {
-  // Generate clean 4-character blocks without confusing characters
+  // Generate clean 4-character blocks without ambiguous characters
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const getBlock = (len = 4) => {
     let res = "";
@@ -96,54 +148,114 @@ export function formatDurationLabel(durationHours: number): string {
   return `${durationHours} Hour${durationHours > 1 ? "s" : ""}`;
 }
 
+/**
+ * Syncs in-memory / file codes into DB siteSettings table as multi-tier persistence backup
+ */
+async function syncCodesToSiteSettings(codes: StoredCode[]): Promise<void> {
+  try {
+    const jsonStr = JSON.stringify(codes);
+    await db
+      .insert(siteSettingsTable)
+      .values({ key: DB_SETTINGS_KEY, value: jsonStr, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: siteSettingsTable.key,
+        set: { value: jsonStr, updatedAt: new Date() },
+      });
+  } catch (_) {
+    // Non-critical background sync
+  }
+}
+
+/**
+ * Gets all keys directly from the database, reconciling with file cache & siteSettings
+ */
 export async function getAllCodes(): Promise<StoredCode[]> {
+  await ensureDbTableExists();
+
   const fileCodes = loadCodesFromFile();
+  let dbCodes: StoredCode[] = [];
 
-  if (process.env.DATABASE_URL) {
-    try {
-      const dbRows = await db
-        .select()
-        .from(premiumCodesTable)
-        .orderBy(desc(premiumCodesTable.createdAt))
-        .limit(500);
+  try {
+    const dbRows = await db
+      .select()
+      .from(premiumCodesTable)
+      .orderBy(desc(premiumCodesTable.createdAt))
+      .limit(2000);
 
-      if (dbRows && dbRows.length > 0) {
-        const mergedMap = new Map<string, StoredCode>();
-        // Add file codes first
-        for (const c of fileCodes) {
-          mergedMap.set(c.code.toUpperCase(), c);
-        }
-        // DB rows take precedence
-        for (const r of dbRows) {
-          const durationHours = (r as any).durationHours || (r.days * 24);
-          const durationLabel = (r as any).durationLabel || formatDurationLabel(durationHours);
-          mergedMap.set(r.code.toUpperCase(), {
-            id: r.id,
-            code: r.code,
-            tier: r.tier as "premium" | "pro",
-            days: r.days,
-            durationHours,
-            durationLabel,
-            maxUses: r.maxUses,
-            usesCount: r.usesCount,
-            isActive: r.isActive,
-            createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
-          });
-        }
-        const result = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        saveCodesToFile(result);
-        return result;
-      }
-    } catch (e: any) {
-      console.warn("[premiumCodesStore] DB query warning:", e?.message);
+    if (Array.isArray(dbRows) && dbRows.length > 0) {
+      dbCodes = dbRows.map((r: any) => {
+        const durationHours = r.durationHours || (r.days * 24);
+        const durationLabel = r.durationLabel || formatDurationLabel(durationHours);
+        const usesCount = r.usesCount ?? 0;
+        const isActivated = usesCount > 0;
+        return {
+          id: r.id,
+          code: r.code,
+          tier: r.tier as "premium" | "pro",
+          days: r.days,
+          durationHours,
+          durationLabel,
+          maxUses: r.maxUses ?? 1,
+          usesCount,
+          isActive: r.isActive ?? true,
+          isActivated,
+          usedByUsername: r.usedByUsername || null,
+          usedByUserId: r.usedByUserId || null,
+          activatedAt: r.activatedAt ? new Date(r.activatedAt).toISOString() : null,
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        };
+      });
     }
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB query warning:", e?.message);
   }
 
-  return fileCodes.sort(
+  // If DB was empty or unavailable, check site_settings backup
+  if (dbCodes.length === 0) {
+    try {
+      const [settingRow] = await db
+        .select()
+        .from(siteSettingsTable)
+        .where(eq(siteSettingsTable.key, DB_SETTINGS_KEY))
+        .limit(1);
+
+      if (settingRow && settingRow.value) {
+        const parsed = JSON.parse(settingRow.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          dbCodes = parsed.map((c: any) => ({
+            ...c,
+            isActivated: Boolean(c.isActivated || (c.usesCount || 0) > 0),
+            isActive: c.isActive !== false,
+          }));
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Merge database records with file cache
+  const mergedMap = new Map<string, StoredCode>();
+
+  // Add file codes first
+  for (const c of fileCodes) {
+    mergedMap.set(c.code.toUpperCase(), c);
+  }
+
+  // Database rows take precedence
+  for (const c of dbCodes) {
+    mergedMap.set(c.code.toUpperCase(), c);
+  }
+
+  const result = Array.from(mergedMap.values()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+
+  // Keep local file cache and siteSettings in sync
+  if (result.length > 0) {
+    saveCodesToFile(result);
+    syncCodesToSiteSettings(result);
+  }
+
+  return result;
 }
 
 export interface CreateCodesParams {
@@ -157,6 +269,8 @@ export interface CreateCodesParams {
 }
 
 export async function createCodesBatch(params: CreateCodesParams): Promise<StoredCode[]> {
+  await ensureDbTableExists();
+
   const tier = params.tier === "pro" ? "pro" : "premium";
   const count = Math.min(500, Math.max(1, Math.floor(Number(params.count || 1))));
   const maxUses = Math.max(1, Math.floor(Number(params.maxUses || 1)));
@@ -198,30 +312,32 @@ export async function createCodesBatch(params: CreateCodesParams): Promise<Store
       maxUses,
       usesCount: 0,
       isActive: true,
+      isActivated: false,
+      usedByUsername: null,
+      usedByUserId: null,
+      activatedAt: null,
       createdAt: new Date().toISOString(),
     };
 
-    if (process.env.DATABASE_URL) {
-      try {
-        const [inserted] = await db
-          .insert(premiumCodesTable)
-          .values({
-            code: newCodeObj.code,
-            tier: newCodeObj.tier,
-            days: newCodeObj.days,
-            durationHours: newCodeObj.durationHours,
-            durationLabel: newCodeObj.durationLabel,
-            maxUses: newCodeObj.maxUses,
-            usesCount: 0,
-            isActive: true,
-          } as any)
-          .returning();
-        if (inserted?.id) {
-          newCodeObj.id = inserted.id;
-        }
-      } catch (e: any) {
-        console.warn("[premiumCodesStore] DB insert warning:", e?.message);
+    try {
+      const [inserted] = await db
+        .insert(premiumCodesTable)
+        .values({
+          code: newCodeObj.code,
+          tier: newCodeObj.tier,
+          days: newCodeObj.days,
+          durationHours: newCodeObj.durationHours,
+          durationLabel: newCodeObj.durationLabel,
+          maxUses: newCodeObj.maxUses,
+          usesCount: 0,
+          isActive: true,
+        } as any)
+        .returning();
+      if (inserted?.id) {
+        newCodeObj.id = inserted.id;
       }
+    } catch (e: any) {
+      console.warn("[premiumCodesStore] DB insert warning:", e?.message);
     }
 
     newCodes.push(newCodeObj);
@@ -229,43 +345,85 @@ export async function createCodesBatch(params: CreateCodesParams): Promise<Store
 
   const updatedList = [...newCodes, ...existingCodes];
   saveCodesToFile(updatedList);
+  syncCodesToSiteSettings(updatedList);
 
   return newCodes;
 }
 
 export async function findCode(codeStr: string): Promise<StoredCode | null> {
   const sanitized = codeStr.trim().toUpperCase();
+
+  try {
+    const [row] = await db
+      .select()
+      .from(premiumCodesTable)
+      .where(eq(premiumCodesTable.code, sanitized))
+      .limit(1);
+
+    if (row) {
+      const durationHours = (row as any).durationHours || (row.days * 24);
+      const durationLabel = (row as any).durationLabel || formatDurationLabel(durationHours);
+      return {
+        id: row.id,
+        code: row.code,
+        tier: row.tier as "premium" | "pro",
+        days: row.days,
+        durationHours,
+        durationLabel,
+        maxUses: row.maxUses,
+        usesCount: row.usesCount,
+        isActive: row.isActive,
+        isActivated: (row.usesCount || 0) > 0,
+        usedByUsername: (row as any).usedByUsername || null,
+        usedByUserId: (row as any).usedByUserId || null,
+        activatedAt: (row as any).activatedAt ? new Date((row as any).activatedAt).toISOString() : null,
+        createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+      };
+    }
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB find warning:", e?.message);
+  }
+
   const all = await getAllCodes();
-  const found = all.find((c) => c.code.toUpperCase() === sanitized);
-  return found || null;
+  return all.find((c) => c.code.toUpperCase() === sanitized) || null;
 }
 
-export async function recordCodeRedemption(codeId: number): Promise<StoredCode | null> {
+export async function recordCodeRedemption(
+  codeId: number,
+  userInfo?: { id?: number; username?: string }
+): Promise<StoredCode | null> {
   const all = await getAllCodes();
   const idx = all.findIndex((c) => c.id === codeId);
   if (idx === -1) return null;
 
   const codeObj = all[idx];
   codeObj.usesCount += 1;
+  codeObj.isActivated = true;
+  codeObj.activatedAt = new Date().toISOString();
+  if (userInfo?.username) codeObj.usedByUsername = userInfo.username;
+  if (userInfo?.id) codeObj.usedByUserId = userInfo.id;
+
   if (codeObj.usesCount >= codeObj.maxUses) {
     codeObj.isActive = false;
   }
 
   all[idx] = codeObj;
   saveCodesToFile(all);
+  syncCodesToSiteSettings(all);
 
-  if (process.env.DATABASE_URL) {
-    try {
-      await db
-        .update(premiumCodesTable)
-        .set({
-          usesCount: codeObj.usesCount,
-          isActive: codeObj.isActive,
-        })
-        .where(eq(premiumCodesTable.id, codeId));
-    } catch (e: any) {
-      console.warn("[premiumCodesStore] DB update warning:", e?.message);
-    }
+  try {
+    await db
+      .update(premiumCodesTable)
+      .set({
+        usesCount: codeObj.usesCount,
+        isActive: codeObj.isActive,
+        usedByUsername: codeObj.usedByUsername ?? null,
+        usedByUserId: codeObj.usedByUserId ?? null,
+        activatedAt: new Date(),
+      } as any)
+      .where(or(eq(premiumCodesTable.id, codeId), eq(premiumCodesTable.code, codeObj.code)));
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB update warning:", e?.message);
   }
 
   return codeObj;
@@ -276,18 +434,42 @@ export async function deactivateCodeById(codeId: number): Promise<boolean> {
   const idx = all.findIndex((c) => c.id === codeId);
   if (idx === -1) return false;
 
-  all[idx].isActive = false;
+  const codeObj = all[idx];
+  codeObj.isActive = false;
+  all[idx] = codeObj;
   saveCodesToFile(all);
+  syncCodesToSiteSettings(all);
 
-  if (process.env.DATABASE_URL) {
-    try {
-      await db
-        .update(premiumCodesTable)
-        .set({ isActive: false })
-        .where(eq(premiumCodesTable.id, codeId));
-    } catch (e: any) {
-      console.warn("[premiumCodesStore] DB deactivate warning:", e?.message);
-    }
+  try {
+    await db
+      .update(premiumCodesTable)
+      .set({ isActive: false })
+      .where(or(eq(premiumCodesTable.id, codeId), eq(premiumCodesTable.code, codeObj.code)));
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB deactivate warning:", e?.message);
+  }
+
+  return true;
+}
+
+export async function reactivateCodeById(codeId: number): Promise<boolean> {
+  const all = await getAllCodes();
+  const idx = all.findIndex((c) => c.id === codeId);
+  if (idx === -1) return false;
+
+  const codeObj = all[idx];
+  codeObj.isActive = true;
+  all[idx] = codeObj;
+  saveCodesToFile(all);
+  syncCodesToSiteSettings(all);
+
+  try {
+    await db
+      .update(premiumCodesTable)
+      .set({ isActive: true })
+      .where(or(eq(premiumCodesTable.id, codeId), eq(premiumCodesTable.code, codeObj.code)));
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB reactivate warning:", e?.message);
   }
 
   return true;
@@ -295,19 +477,25 @@ export async function deactivateCodeById(codeId: number): Promise<boolean> {
 
 export async function deleteCodeById(codeId: number): Promise<boolean> {
   const all = await getAllCodes();
+  const target = all.find((c) => c.id === codeId);
   const filtered = all.filter((c) => c.id !== codeId);
   if (filtered.length === all.length) return false;
 
   saveCodesToFile(filtered);
+  syncCodesToSiteSettings(filtered);
 
-  if (process.env.DATABASE_URL) {
-    try {
+  try {
+    if (target?.code) {
+      await db
+        .delete(premiumCodesTable)
+        .where(or(eq(premiumCodesTable.id, codeId), eq(premiumCodesTable.code, target.code)));
+    } else {
       await db
         .delete(premiumCodesTable)
         .where(eq(premiumCodesTable.id, codeId));
-    } catch (e: any) {
-      console.warn("[premiumCodesStore] DB delete warning:", e?.message);
     }
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB delete warning:", e?.message);
   }
 
   return true;
@@ -315,13 +503,12 @@ export async function deleteCodeById(codeId: number): Promise<boolean> {
 
 export async function clearAllCodes(): Promise<boolean> {
   saveCodesToFile([]);
+  syncCodesToSiteSettings([]);
 
-  if (process.env.DATABASE_URL) {
-    try {
-      await db.delete(premiumCodesTable);
-    } catch (e: any) {
-      console.warn("[premiumCodesStore] DB delete all warning:", e?.message);
-    }
+  try {
+    await db.delete(premiumCodesTable);
+  } catch (e: any) {
+    console.warn("[premiumCodesStore] DB delete all warning:", e?.message);
   }
 
   return true;

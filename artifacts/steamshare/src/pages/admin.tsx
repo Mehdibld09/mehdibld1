@@ -5017,7 +5017,8 @@ function PremiumAdminTab() {
   const [copiedBatch, setCopiedBatch] = useState(false);
   const [copiedSingleCode, setCopiedSingleCode] = useState<string | null>(null);
   const [copiedActiveAll, setCopiedActiveAll] = useState(false);
-  const [codesFilter, setCodesFilter] = useState<"all" | "active" | "redeemed">("all");
+  const [copiedNotActivated, setCopiedNotActivated] = useState(false);
+  const [codesFilter, setCodesFilter] = useState<"all" | "not_activated" | "activated" | "deactivated">("all");
   const [codesSearch, setCodesSearch] = useState("");
 
   // Grant time state
@@ -5135,7 +5136,7 @@ function PremiumAdminTab() {
     },
   });
 
-  const { data: codes = [], refetch: refetchCodes } = useQuery({
+  const { data: codes = [], refetch: refetchCodes, isFetching: isFetchingCodes } = useQuery({
     queryKey: ["admin-premium-codes"],
     queryFn: async () => {
       const res = await fetch("/api/premium/codes", { credentials: "include" });
@@ -5228,6 +5229,16 @@ function PremiumAdminTab() {
       return res.json();
     },
     onSuccess: () => { refetchCodes(); toast({ title: "Key deactivated" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const reactivateCodeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/premium/codes/${id}/reactivate`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    onSuccess: () => { refetchCodes(); toast({ title: "Key reactivated" }); },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -5637,184 +5648,437 @@ function PremiumAdminTab() {
           </div>
         )}
 
-        {/* Existing & Active Codes Manager */}
-        <div className="space-y-3 pt-2">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Keys Database ({((codes as any[]) || []).length})
-              </p>
-              <div className="flex items-center gap-1">
-                {(["all", "active", "redeemed"] as const).map((filter) => (
+        {/* Existing & Active Codes Manager (Keys Database) */}
+        {(() => {
+          const codesList = (codes as any[]) || [];
+          const totalCodesCount = codesList.length;
+          const activatedCodesList = codesList.filter(
+            (c: any) => Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0)
+          );
+          const notActivatedCodesList = codesList.filter(
+            (c: any) =>
+              !Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0) &&
+              (c.isActive !== false && c.is_active !== false)
+          );
+          const deactivatedCodesList = codesList.filter(
+            (c: any) =>
+              (c.isActive === false || c.is_active === false) &&
+              !Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0)
+          );
+          const proCodesCount = codesList.filter((c: any) => c.tier === "pro").length;
+          const premiumCodesCount = codesList.filter((c: any) => c.tier === "premium").length;
+
+          const filteredCodes = codesList.filter((c: any) => {
+            const isAct = Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0);
+            const isActv = c.isActive !== false && c.is_active !== false;
+
+            if (codesFilter === "not_activated" && (isAct || !isActv)) return false;
+            if (codesFilter === "activated" && !isAct) return false;
+            if (codesFilter === "deactivated" && isActv) return false;
+
+            if (codesSearch.trim()) {
+              const q = codesSearch.toLowerCase();
+              const codeMatch = (c.code || "").toLowerCase().includes(q);
+              const tierMatch = (c.tier || "").toLowerCase().includes(q);
+              const userMatch = (c.usedByUsername || "").toLowerCase().includes(q);
+              const labelMatch = (c.durationLabel || "").toLowerCase().includes(q);
+              return codeMatch || tierMatch || userMatch || labelMatch;
+            }
+            return true;
+          });
+
+          const copyNotActivatedKeys = () => {
+            if (notActivatedCodesList.length === 0) {
+              toast({ title: "No keys to copy", description: "There are no unredeemed keys available." });
+              return;
+            }
+            navigator.clipboard.writeText(notActivatedCodesList.map((c: any) => c.code).join("\n"));
+            setCopiedNotActivated(true);
+            setTimeout(() => setCopiedNotActivated(false), 2500);
+            toast({
+              title: "Copied Not Activated Keys!",
+              description: `${notActivatedCodesList.length} unused keys copied to clipboard (ready to share).`,
+            });
+          };
+
+          const exportKeysTxt = () => {
+            if (filteredCodes.length === 0) {
+              toast({ title: "No keys to export", description: "Current view has no keys to export." });
+              return;
+            }
+            const lines = [
+              `================================================`,
+              ` STEAMSHARE KEYS DATABASE EXPORT`,
+              ` Filter: ${codesFilter.toUpperCase()} | Total: ${filteredCodes.length}`,
+              ` Exported: ${new Date().toLocaleString()}`,
+              `================================================`,
+              ``,
+              ...filteredCodes.map((c: any) => {
+                const isAct = Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0);
+                const statusStr = isAct
+                  ? `[ACTIVATED by @${c.usedByUsername || "unknown"} on ${c.activatedAt || "unknown"}]`
+                  : `[NOT ACTIVATED - READY]`;
+                return `${c.code} | ${c.tier?.toUpperCase()} | ${c.durationLabel || `${c.days}d`} | ${statusStr}`;
+              }),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `steamshare_keys_${codesFilter}_${filteredCodes.length}.txt`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            toast({ title: "Exported Keys", description: `Saved ${filteredCodes.length} keys to text file.` });
+          };
+
+          return (
+            <div className="space-y-4 pt-3 border-t border-border/40">
+              {/* Header and Controls */}
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-primary" />
+                    <h4 className="text-sm font-bold text-foreground tracking-wide uppercase">
+                      Keys Database
+                    </h4>
+                  </div>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    DB Synced ({totalCodesCount})
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      refetchCodes();
+                      toast({ title: "Refreshed from DB", description: "Key database reloaded from database." });
+                    }}
+                    disabled={isFetchingCodes}
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+                    title="Force refresh keys directly from database"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isFetchingCodes ? "animate-spin text-primary" : ""}`} />
+                    Refresh DB
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    placeholder="Search code, tier, @user..."
+                    value={codesSearch}
+                    onChange={(e) => setCodesSearch(e.target.value)}
+                    className="w-40 sm:w-56 h-8 text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyNotActivatedKeys}
+                    className="h-8 text-xs px-2.5 font-medium gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                    title="Copy all unused, unredeemed keys to clipboard"
+                  >
+                    {copiedNotActivated ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                    Copy Not Activated ({notActivatedCodesList.length})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportKeysTxt}
+                    className="h-8 text-xs px-2.5 font-medium gap-1 text-muted-foreground hover:text-foreground"
+                    title="Download list of keys as text file"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export
+                  </Button>
+                  {totalCodesCount > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to delete all ${totalCodesCount} keys from database?`)) {
+                          clearAllCodesMutation.mutate();
+                        }
+                      }}
+                      disabled={clearAllCodesMutation.isPending}
+                      className="h-8 text-xs px-2.5 font-medium gap-1 text-destructive hover:bg-destructive/10 border-destructive/30"
+                      title="Delete all keys from database"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Clear All
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Database Status & Counter Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div
+                  onClick={() => setCodesFilter("all")}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                    codesFilter === "all"
+                      ? "bg-primary/15 border-primary/50 shadow-sm"
+                      : "bg-muted/30 border-border/60 hover:bg-muted/50"
+                  }`}
+                >
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">All Keys in DB</p>
+                  <p className="text-xl font-extrabold text-foreground mt-0.5">{totalCodesCount}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    💎 {proCodesCount} Pro • ⭐ {premiumCodesCount} Premium
+                  </p>
+                </div>
+
+                <div
+                  onClick={() => setCodesFilter("not_activated")}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                    codesFilter === "not_activated"
+                      ? "bg-emerald-500/15 border-emerald-500/50 shadow-sm"
+                      : "bg-muted/30 border-border/60 hover:bg-muted/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Not Activated</p>
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  </div>
+                  <p className="text-xl font-extrabold text-emerald-400 mt-0.5">{notActivatedCodesList.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Ready for redemption</p>
+                </div>
+
+                <div
+                  onClick={() => setCodesFilter("activated")}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                    codesFilter === "activated"
+                      ? "bg-purple-500/15 border-purple-500/50 shadow-sm"
+                      : "bg-muted/30 border-border/60 hover:bg-muted/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold text-purple-400 uppercase tracking-wider">Activated</p>
+                    <CheckCircle2 className="h-3 w-3 text-purple-400" />
+                  </div>
+                  <p className="text-xl font-extrabold text-purple-400 mt-0.5">{activatedCodesList.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Redeemed by users</p>
+                </div>
+
+                <div
+                  onClick={() => setCodesFilter("deactivated")}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                    codesFilter === "deactivated"
+                      ? "bg-amber-500/15 border-amber-500/50 shadow-sm"
+                      : "bg-muted/30 border-border/60 hover:bg-muted/50"
+                  }`}
+                >
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Deactivated</p>
+                  <p className="text-xl font-extrabold text-muted-foreground mt-0.5">{deactivatedCodesList.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Revoked manually</p>
+                </div>
+              </div>
+
+              {/* Filter Tabs */}
+              <div className="flex items-center gap-1.5 border-b border-border/60 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setCodesFilter("all")}
+                  className={`px-3 py-1 text-xs rounded-md font-semibold transition-colors ${
+                    codesFilter === "all"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  All Keys ({totalCodesCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCodesFilter("not_activated")}
+                  className={`px-3 py-1 text-xs rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
+                    codesFilter === "not_activated"
+                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                      : "text-muted-foreground hover:text-emerald-400 hover:bg-muted/40"
+                  }`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Not Activated ({notActivatedCodesList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCodesFilter("activated")}
+                  className={`px-3 py-1 text-xs rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
+                    codesFilter === "activated"
+                      ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                      : "text-muted-foreground hover:text-purple-400 hover:bg-muted/40"
+                  }`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+                  Activated ({activatedCodesList.length})
+                </button>
+                {deactivatedCodesList.length > 0 && (
                   <button
-                    key={filter}
                     type="button"
-                    onClick={() => setCodesFilter(filter)}
-                    className={`px-2 py-0.5 text-[11px] rounded font-medium capitalize transition-colors ${
-                      codesFilter === filter
-                        ? "bg-primary/20 text-primary font-bold"
-                        : "text-muted-foreground hover:text-foreground"
+                    onClick={() => setCodesFilter("deactivated")}
+                    className={`px-3 py-1 text-xs rounded-md font-semibold transition-colors ${
+                      codesFilter === "deactivated"
+                        ? "bg-muted text-foreground border border-border"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                     }`}
                   >
-                    {filter}
+                    Deactivated ({deactivatedCodesList.length})
                   </button>
-                ))}
+                )}
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="Search keys..."
-                value={codesSearch}
-                onChange={(e) => setCodesSearch(e.target.value)}
-                className="w-40 sm:w-48 h-8 text-xs"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const active = (codes as any[]).filter((c) => c.isActive ?? c.is_active);
-                  if (active.length === 0) {
-                    toast({ title: "No active keys", description: "No active keys to copy." });
-                    return;
-                  }
-                  navigator.clipboard.writeText(active.map((c) => c.code).join("\n"));
-                  setCopiedActiveAll(true);
-                  setTimeout(() => setCopiedActiveAll(false), 2000);
-                  toast({ title: "Copied!", description: `${active.length} active keys copied.` });
-                }}
-                className="h-8 text-xs px-2.5 font-medium gap-1"
-                title="Copy all currently active keys"
-              >
-                {copiedActiveAll ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
-                Copy Active
-              </Button>
-              {((codes as any[]) || []).length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (window.confirm("Are you sure you want to delete all keys?")) {
-                      clearAllCodesMutation.mutate();
-                    }
-                  }}
-                  disabled={clearAllCodesMutation.isPending}
-                  className="h-8 text-xs px-2.5 font-medium gap-1 text-destructive hover:bg-destructive/10 border-destructive/30"
-                  title="Delete all keys"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Clear All
-                </Button>
-              )}
-            </div>
-          </div>
+              {/* Codes Table */}
+              {totalCodesCount === 0 ? (
+                <div className="text-center py-8 bg-muted/20 border border-border/80 rounded-xl space-y-2">
+                  <KeyRound className="h-8 w-8 text-muted-foreground/60 mx-auto" />
+                  <p className="text-sm font-semibold text-foreground">No VIP keys found in database</p>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                    Use the generator above to create your first batch of keys with your preferred duration and tier.
+                  </p>
+                </div>
+              ) : filteredCodes.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6 bg-muted/20 border border-border rounded-lg">
+                  No keys match the current filter ({codesFilter}) or search term.
+                </p>
+              ) : (
+                <div className="bg-background border border-border/80 rounded-xl overflow-hidden divide-y divide-border/60 max-h-96 overflow-y-auto">
+                  {filteredCodes.map((c: any, idx: number) => {
+                    const isActivated = Boolean(c.isActivated || (c.usesCount ?? c.uses_count ?? 0) > 0);
+                    const isActive = c.isActive !== false && c.is_active !== false;
+                    const usesCount = c.usesCount ?? c.uses_count ?? 0;
+                    const maxUses = c.maxUses ?? c.max_uses ?? 1;
+                    const durationDisplay =
+                      c.durationLabel ||
+                      (c.durationHours
+                        ? c.durationHours < 24
+                          ? `${c.durationHours}h`
+                          : `${Math.round(c.durationHours / 24)}d`
+                        : `${c.days || 30}d`);
 
-          {/* Codes List Table */}
-          {((codes as any[]) || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6 bg-muted/20 border border-border rounded-lg">
-              No keys generated yet. Use the generator above to create your first VIP keys!
-            </p>
-          ) : (
-            <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border max-h-72 overflow-y-auto">
-              {(codes as any[])
-                .filter((c: any) => {
-                  const isActive = c.isActive ?? c.is_active;
-                  if (codesFilter === "active" && !isActive) return false;
-                  if (codesFilter === "redeemed" && isActive) return false;
-                  if (codesSearch.trim()) {
-                    const q = codesSearch.toLowerCase();
-                    return c.code.toLowerCase().includes(q) || c.tier.toLowerCase().includes(q);
-                  }
-                  return true;
-                })
-                .map((c: any) => {
-                  const isActive = c.isActive ?? c.is_active;
-                  const usesCount = c.usesCount ?? c.uses_count ?? 0;
-                  const maxUses = c.maxUses ?? c.max_uses ?? 1;
-                  const durationDisplay = c.durationLabel || (c.durationHours ? (c.durationHours < 24 ? `${c.durationHours}h` : `${Math.round(c.durationHours / 24)}d`) : `${c.days}d`);
-
-                  return (
-                    <div
-                      key={c.id}
-                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40 ${
-                        !isActive ? "opacity-50" : ""
-                      }`}
-                    >
-                      <code className="font-mono font-bold text-primary text-xs tracking-wider select-all">
-                        {c.code}
-                      </code>
-
-                      <button
-                        type="button"
-                        onClick={() => copySingleKey(c.code)}
-                        className="text-muted-foreground hover:text-foreground p-1 transition-colors"
-                        title="Copy key"
-                      >
-                        {copiedSingleCode === c.code ? (
-                          <Check className="h-3.5 w-3.5 text-green-400" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded font-semibold capitalize ${
-                          c.tier === "pro"
-                            ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                            : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                    return (
+                      <div
+                        key={c.id || c.code || idx}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 text-sm transition-colors hover:bg-muted/30 ${
+                          !isActive && !isActivated ? "opacity-60 bg-muted/10" : ""
                         }`}
                       >
-                        {c.tier === "pro" ? "💎 Pro VIP" : "⭐ Premium"}
-                      </span>
+                        {/* Key code & Tier Info */}
+                        <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                          <span className="text-[10px] font-mono text-muted-foreground w-6">#{idx + 1}</span>
+                          <code className="font-mono font-extrabold text-primary text-xs sm:text-sm tracking-wider select-all bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">
+                            {c.code}
+                          </code>
 
-                      <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground font-medium">
-                        ⏱️ {durationDisplay}
-                      </span>
-
-                      <span className="text-xs text-muted-foreground ml-auto">
-                        {usesCount} / {maxUses} uses
-                      </span>
-
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                          isActive
-                            ? "bg-green-500/20 text-green-400 border border-green-500/30"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {isActive ? "Active" : "Redeemed"}
-                      </span>
-
-                      <div className="flex items-center gap-1 shrink-0 ml-1">
-                        {isActive && (
                           <button
                             type="button"
-                            onClick={() => deactivateCodeMutation.mutate(c.id)}
-                            className="text-muted-foreground hover:text-amber-400 p-1 rounded transition-colors"
-                            title="Deactivate key"
+                            onClick={() => copySingleKey(c.code)}
+                            className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted transition-colors"
+                            title="Copy key code"
                           >
-                            <X className="h-4 w-4" />
+                            {copiedSingleCode === c.code ? (
+                              <Check className="h-3.5 w-3.5 text-green-400" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm(`Delete key ${c.code}?`)) {
-                              deleteCodeMutation.mutate(c.id);
-                            }
-                          }}
-                          className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
-                          title="Permanently delete key"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded font-semibold uppercase tracking-wider ${
+                              c.tier === "pro"
+                                ? "bg-blue-500/20 text-blue-400 border border-blue-500/30 font-bold"
+                                : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-bold"
+                            }`}
+                          >
+                            {c.tier === "pro" ? "💎 Pro VIP" : "⭐ Premium"}
+                          </span>
+
+                          <span className="text-xs px-2 py-0.5 rounded bg-muted/60 text-muted-foreground font-medium border border-border/50">
+                            ⏱️ {durationDisplay}
+                          </span>
+                        </div>
+
+                        {/* Activation Status & Details */}
+                        <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+                          {isActivated ? (
+                            <div className="flex flex-col sm:items-end text-left sm:text-right">
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Activated
+                              </span>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                {c.usedByUsername ? (
+                                  <>Claimed by <span className="font-semibold text-foreground">@{c.usedByUsername}</span></>
+                                ) : (
+                                  "Claimed"
+                                )}
+                                {c.activatedAt && (
+                                  <span className="ml-1 text-[10px]">
+                                    ({new Date(c.activatedAt).toLocaleDateString()})
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          ) : isActive ? (
+                            <div className="flex flex-col sm:items-end text-left sm:text-right">
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                Not Activated
+                              </span>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Ready to redeem • {usesCount}/{maxUses} uses
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col sm:items-end text-left sm:text-right">
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-muted text-muted-foreground border border-border">
+                                Deactivated
+                              </span>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">Disabled by admin</p>
+                            </div>
+                          )}
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-1 shrink-0 border-l border-border/60 pl-2">
+                            {isActive ? (
+                              <button
+                                type="button"
+                                onClick={() => deactivateCodeMutation.mutate(c.id)}
+                                className="text-muted-foreground hover:text-amber-400 p-1 rounded hover:bg-muted transition-colors"
+                                title="Deactivate key (disable without deleting)"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => reactivateCodeMutation.mutate(c.id)}
+                                className="text-muted-foreground hover:text-emerald-400 p-1 rounded hover:bg-muted transition-colors"
+                                title="Reactivate key"
+                              >
+                                <Check className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Permanently delete key ${c.code} from database?`)) {
+                                  deleteCodeMutation.mutate(c.id);
+                                }
+                              }}
+                              className="text-muted-foreground hover:text-destructive p-1 rounded hover:bg-destructive/10 transition-colors"
+                              title="Permanently delete key"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
 
       {/* Active Premium Users */}

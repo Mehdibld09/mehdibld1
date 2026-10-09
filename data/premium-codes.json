@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": 1,
+    "code": "VIP-8Y5F-B687",
+    "tier": "pro",
+    "days": 30,
+    "durationHours": 720,
+    "durationLabel": "1 Month",
+    "maxUses": 1,
+    "usesCount": 0,
+    "isActive": true,
+    "isActivated": false,
+    "usedByUsername": null,
+    "usedByUserId": null,
+    "activatedAt": null,
+    "createdAt": "2026-10-09T13:30:00.000Z"
+  }
+]

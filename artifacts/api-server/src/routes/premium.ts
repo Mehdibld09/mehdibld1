@@ -10,6 +10,7 @@ import {
   findCode,
   recordCodeRedemption,
   deactivateCodeById,
+  reactivateCodeById,
   deleteCodeById,
   clearAllCodes,
   formatDurationLabel,
@@ -292,6 +293,14 @@ router.delete("/codes/:id", requireAdmin, async (req, res) => {
   res.json({ message: "Code deactivated" });
 });
 
+// POST /premium/codes/:id/reactivate — admin reactivate a code
+router.post("/codes/:id/reactivate", requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  await reactivateCodeById(id);
+  res.json({ message: "Code reactivated" });
+});
+
 // POST /premium/codes/:id/delete — admin permanently delete a code
 router.post("/codes/:id/delete", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -335,7 +344,7 @@ router.post("/redeem", requireAuth, async (req, res) => {
   const expiresAt = new Date(baseTime + durationMs);
 
   await db.update(usersTable).set({ premiumTier: newTier, premiumExpiresAt: expiresAt }).where(eq(usersTable.id, userId));
-  await recordCodeRedemption(premCode.id);
+  await recordCodeRedemption(premCode.id, { id: user.id, username: user.username });
 
   const durationText = premCode.durationLabel || formatDurationLabel(premCode.durationHours || premCode.days * 24);
   res.json({
