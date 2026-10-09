@@ -11,6 +11,7 @@ import {
   recordCodeRedemption,
   deactivateCodeById,
   deleteCodeById,
+  clearAllCodes,
   formatDurationLabel,
 } from "../lib/premiumCodesStore";
 
@@ -297,6 +298,12 @@ router.post("/codes/:id/delete", requireAdmin, async (req, res) => {
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   await deleteCodeById(id);
   res.json({ message: "Code deleted" });
+});
+
+// POST /premium/codes/clear-all — admin delete all codes
+router.post("/codes/clear-all", requireAdmin, async (_req, res) => {
+  await clearAllCodes();
+  res.json({ message: "All keys deleted" });
 });
 
 // POST /premium/redeem — user redeem a code

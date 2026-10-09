@@ -312,3 +312,17 @@ export async function deleteCodeById(codeId: number): Promise<boolean> {
 
   return true;
 }
+
+export async function clearAllCodes(): Promise<boolean> {
+  saveCodesToFile([]);
+
+  if (process.env.DATABASE_URL) {
+    try {
+      await db.delete(premiumCodesTable);
+    } catch (e: any) {
+      console.warn("[premiumCodesStore] DB delete all warning:", e?.message);
+    }
+  }
+
+  return true;
+}

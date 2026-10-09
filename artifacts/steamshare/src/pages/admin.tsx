@@ -5241,6 +5241,19 @@ function PremiumAdminTab() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const clearAllCodesMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/premium/codes/clear-all", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchCodes();
+      toast({ title: "All keys deleted" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const filtered = searchResults.slice(0, 8);
 
   const grantMutation = useMutation({
@@ -5676,6 +5689,23 @@ function PremiumAdminTab() {
                 {copiedActiveAll ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
                 Copy Active
               </Button>
+              {((codes as any[]) || []).length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to delete all keys?")) {
+                      clearAllCodesMutation.mutate();
+                    }
+                  }}
+                  disabled={clearAllCodesMutation.isPending}
+                  className="h-8 text-xs px-2.5 font-medium gap-1 text-destructive hover:bg-destructive/10 border-destructive/30"
+                  title="Delete all keys"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear All
+                </Button>
+              )}
             </div>
           </div>
 
