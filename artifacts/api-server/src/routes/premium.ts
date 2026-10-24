@@ -238,7 +238,7 @@ router.post("/generate-code", requireAdmin, async (req, res) => {
     res.json({
       codes: generatedList,
       count: generatedList.length,
-      message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "Pro VIP" : "VIP"} keys!`,
+      message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "VIP" : "Premium"} keys!`,
     });
   }
 });
@@ -281,7 +281,7 @@ router.post("/generate-batch", requireAdmin, async (req, res) => {
   res.json({
     codes: generatedList,
     count: generatedList.length,
-    message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "Pro VIP" : "VIP"} keys!`,
+    message: `Successfully generated ${generatedList.length} ${tier === "pro" ? "VIP" : "Premium"} keys!`,
   });
 });
 
@@ -348,7 +348,7 @@ router.post("/redeem", requireAuth, async (req, res) => {
 
   const durationText = premCode.durationLabel || formatDurationLabel(premCode.durationHours || premCode.days * 24);
   res.json({
-    message: `🎉 ${newTier === "pro" ? "Pro VIP" : "VIP"} activated for ${durationText}!`,
+    message: `🎉 ${newTier === "pro" ? "VIP" : "Premium"} activated for ${durationText}!`,
     tier: newTier,
     expiresAt,
   });

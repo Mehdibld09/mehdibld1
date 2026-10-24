@@ -38,16 +38,6 @@ function DashboardTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { data, isLoading } = useQuery({ queryKey: ["admin-dashboard"], queryFn: fetchDashboard, refetchInterval: 120_000 });
   const [period, setPeriod] = useState<"24h" | "7d" | "30d">("7d");
 
-  const { data: emailStatsData } = useQuery({
-    queryKey: ["admin-email-stats"],
-    queryFn: async () => {
-      const res = await fetch("/api/site-settings/email-stats", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load email statistics");
-      return res.json();
-    },
-    refetchInterval: 12000,
-  });
-
   if (isLoading) return <div className="text-muted-foreground text-sm py-8 text-center">Loading dashboard...</div>;
   if (!data) return <div className="text-muted-foreground text-sm py-8 text-center">No data</div>;
 
@@ -120,54 +110,6 @@ function DashboardTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={<Flag className="h-5 w-5" />} label="Total Reports" value={data.reports.total} sub="All-time submitted" />
           <StatCard icon={<Flag className="h-5 w-5" />} label="Open Reports" value={data.reports.open} sub="Needs attention" color={data.reports.open > 0 ? "text-red-500" : "text-emerald-500"} />
-        </div>
-      </section>
-
-      {/* Email & 2FA Deliveries */}
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-bold flex items-center gap-2">
-            <Mail className="h-4 w-4 text-primary" /> Email & 2FA Deliveries
-          </h3>
-          {onNavigate && (
-            <button
-              onClick={() => onNavigate("email-analytics")}
-              className="text-xs text-primary hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-            >
-              <span>View Full Analytics & Logs</span>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            icon={<KeyRound className="h-5 w-5" />}
-            label="2FA Login Codes"
-            value={emailStatsData?.stats?.byPurpose?.["2fa_login"]?.total ?? 0}
-            sub={`${emailStatsData?.stats?.byPurpose?.["2fa_login"]?.success ?? 0} delivered`}
-            color="text-cyan-400"
-          />
-          <StatCard
-            icon={<CheckCircle2 className="h-5 w-5" />}
-            label="Verifications"
-            value={emailStatsData?.stats?.byPurpose?.["verify_email"]?.total ?? 0}
-            sub={`${emailStatsData?.stats?.byPurpose?.["verify_email"]?.success ?? 0} delivered`}
-            color="text-emerald-400"
-          />
-          <StatCard
-            icon={<Send className="h-5 w-5" />}
-            label="Total Dispatched"
-            value={emailStatsData?.stats?.totalSent ?? 0}
-            sub={`${emailStatsData?.stats?.successRate ?? 100}% delivery rate`}
-            color="text-primary"
-          />
-          <StatCard
-            icon={<Zap className="h-5 w-5" />}
-            label="Avg Latency"
-            value={`${emailStatsData?.stats?.avgDurationMs ?? 0}ms`}
-            sub="Server response"
-            color="text-purple-400"
-          />
         </div>
       </section>
     </div>
@@ -401,7 +343,6 @@ export default function Admin() {
     {
       group: "System & Security",
       items: [
-        { value: "email-analytics", label: "Email & 2FA Stats", icon: Mail, modAllowed: false },
         { value: "site-settings", label: "Site Settings", icon: Settings, modAllowed: false },
         { value: "premium", label: "Premium & VIP", icon: Star, modAllowed: false },
         { value: "ip-bans", label: "IP Bans", icon: Ban, modAllowed: false },
@@ -586,12 +527,6 @@ export default function Admin() {
               {activeTab === "reports" && <ReportsTab />}
               {isAdmin && activeTab === "store" && <StoreTab />}
               {isAdmin && activeTab === "announcements" && <AnnouncementsTab />}
-              {isAdmin && activeTab === "email-analytics" && (
-                <div className="space-y-6">
-                  <EmailStatsSection />
-                  <SmtpSettingsSection />
-                </div>
-              )}
               {isAdmin && activeTab === "site-settings" && <SiteSettingsTab />}
               {isAdmin && activeTab === "premium" && <PremiumAdminTab />}
               {isAdmin && activeTab === "ip-bans" && <IpBansTab />}
@@ -3782,9 +3717,6 @@ function SiteSettingsTab() {
 
       {/* Email (SMTP) Settings */}
       <SmtpSettingsSection />
-
-      {/* Email & 2FA Delivery Statistics */}
-      <EmailStatsSection />
     </div>
   );
 }
@@ -4248,6 +4180,7 @@ function SmtpSettingsSection() {
 }
 
 function EmailStatsSection() {
+  return null;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [filterPurpose, setFilterPurpose] = useState<string>("all");
@@ -5011,8 +4944,6 @@ function PremiumAdminTab() {
   const [timeUnit, setTimeUnit] = useState<"hours" | "days" | "weeks" | "months" | "years" | "lifetime">("months");
   const [codeGenMaxUses, setCodeGenMaxUses] = useState(1);
   const [codeGenCount, setCodeGenCount] = useState(1);
-  const [codePrefixType, setCodePrefixType] = useState<"vip" | "pro" | "none" | "custom">("vip");
-  const [customPrefix, setCustomPrefix] = useState("");
   const [generatedBatch, setGeneratedBatch] = useState<any[]>([]);
   const [copiedBatch, setCopiedBatch] = useState(false);
   const [copiedSingleCode, setCopiedSingleCode] = useState<string | null>(null);
@@ -5074,8 +5005,8 @@ function PremiumAdminTab() {
 
     const lines = [
       `================================================`,
-      ` STEAMSHARE VIP REDEEM KEYS`,
-      ` Tier: ${codeGenTier === "pro" ? "Pro VIP (Diamond)" : "VIP Premium (Gold)"}`,
+      ` STEAMSHARE REDEEM KEYS`,
+      ` Tier: ${codeGenTier === "pro" ? "VIP" : "Premium"}`,
       ` Duration: ${label}`,
       ` Max Uses: ${codeGenMaxUses} use per key`,
       ` Generated: ${new Date().toLocaleString()}`,
@@ -5185,10 +5116,6 @@ function PremiumAdminTab() {
   const generateCodesMutation = useMutation({
     mutationFn: async () => {
       const { durationHours, days, label } = calculateDuration();
-      let prefix: string | undefined = undefined;
-      if (codePrefixType === "vip") prefix = "VIP";
-      else if (codePrefixType === "pro") prefix = "PRO";
-      else if (codePrefixType === "custom" && customPrefix.trim()) prefix = customPrefix.trim();
 
       const res = await fetch("/api/premium/generate-code", {
         method: "POST",
@@ -5201,7 +5128,6 @@ function PremiumAdminTab() {
           durationLabel: label,
           maxUses: codeGenMaxUses,
           count: codeGenCount,
-          prefix,
         }),
       });
       if (!res.ok) {
@@ -5216,8 +5142,8 @@ function PremiumAdminTab() {
       refetchCodes();
       const count = list.length;
       toast({
-        title: `🎉 Generated ${count} VIP ${count === 1 ? "Key" : "Keys"}!`,
-        description: `${codeGenTier === "pro" ? "💎 Pro VIP" : "⭐ VIP Premium"} • ${calculateDuration().label}`,
+        title: `🎉 Generated ${count} ${count === 1 ? "Key" : "Keys"}!`,
+        description: `${codeGenTier === "pro" ? "💎 VIP" : "⭐ Premium"} • ${calculateDuration().label}`,
       });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -5284,7 +5210,7 @@ function PremiumAdminTab() {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       queryClient.invalidateQueries({ queryKey: ["admin-premium-users"] });
       const { label } = calculateGrantDuration();
-      toast({ title: `✨ ${grantTier === "pro" ? "Pro VIP" : "VIP"} granted to ${selectedUser.username} for ${label}` });
+      toast({ title: `✨ ${grantTier === "pro" ? "VIP" : "Premium"} granted to ${selectedUser.username} for ${label}` });
       setSelectedUser((u: any) => ({ ...u, premiumTier: grantTier, premiumExpiresAt: data.expiresAt }));
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -5323,7 +5249,7 @@ function PremiumAdminTab() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["premium-pricing-admin"] });
-      toast({ title: "Pro contact URL saved" });
+      toast({ title: "VIP contact URL saved" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -5353,10 +5279,10 @@ function PremiumAdminTab() {
 
         {/* Generator Controls */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* 1. VIP Tier */}
+          {/* 1. Tier */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-              1. VIP Tier
+              1. Select Tier
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -5368,7 +5294,7 @@ function PremiumAdminTab() {
                     : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
                 }`}
               >
-                <span>⭐</span> VIP Premium
+                <span>⭐</span> Premium
               </button>
               <button
                 type="button"
@@ -5379,11 +5305,11 @@ function PremiumAdminTab() {
                     : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
                 }`}
               >
-                <span>💎</span> Pro VIP
+                <span>💎</span> VIP
               </button>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              {codeGenTier === "pro" ? "Diamond badge, animated name colors, priority claims" : "Gold star badge, 16 premium colors, VIP access"}
+              {codeGenTier === "pro" ? "VIP: Diamond badge, animated name colors, priority claims" : "Premium: Gold star badge, 16 premium colors"}
             </p>
           </div>
 
@@ -5498,38 +5424,6 @@ function PremiumAdminTab() {
         {/* Format, Uses, & Generate Button */}
         <div className="flex flex-wrap items-end justify-between gap-4 pt-3 border-t border-border/40">
           <div className="flex flex-wrap items-center gap-4">
-            {/* Key Prefix */}
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                Key Prefix
-              </p>
-              <div className="flex items-center gap-1.5">
-                {(["vip", "pro", "none", "custom"] as const).map((pType) => (
-                  <button
-                    key={pType}
-                    type="button"
-                    onClick={() => setCodePrefixType(pType)}
-                    className={`px-2.5 py-1 text-xs rounded border transition-colors font-medium uppercase ${
-                      codePrefixType === pType
-                        ? "border-primary bg-primary/20 text-primary font-bold"
-                        : "border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {pType === "none" ? "None" : pType}
-                  </button>
-                ))}
-                {codePrefixType === "custom" && (
-                  <Input
-                    placeholder="PREFIX"
-                    value={customPrefix}
-                    onChange={(e) => setCustomPrefix(e.target.value.toUpperCase())}
-                    className="w-28 h-8 font-mono text-xs uppercase"
-                    maxLength={8}
-                  />
-                )}
-              </div>
-            </div>
-
             {/* Max Uses */}
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
@@ -5567,7 +5461,7 @@ function PremiumAdminTab() {
               </>
             ) : (
               <>
-                <Sparkles className="h-4 w-4" /> Generate {codeGenCount} {codeGenTier === "pro" ? "Pro VIP" : "VIP"} {codeGenCount === 1 ? "Key" : "Keys"}
+                <Sparkles className="h-4 w-4" /> Generate {codeGenCount} {codeGenTier === "pro" ? "VIP" : "Premium"} {codeGenCount === 1 ? "Key" : "Keys"}
               </>
             )}
           </Button>
@@ -5825,7 +5719,7 @@ function PremiumAdminTab() {
                   <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">All Keys in DB</p>
                   <p className="text-xl font-extrabold text-foreground mt-0.5">{totalCodesCount}</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    💎 {proCodesCount} Pro • ⭐ {premiumCodesCount} Premium
+                    💎 {proCodesCount} VIP • ⭐ {premiumCodesCount} Premium
                   </p>
                 </div>
 
@@ -5989,7 +5883,7 @@ function PremiumAdminTab() {
                                 : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-bold"
                             }`}
                           >
-                            {c.tier === "pro" ? "💎 Pro VIP" : "⭐ Premium"}
+                            {c.tier === "pro" ? "💎 VIP" : "⭐ Premium"}
                           </span>
 
                           <span className="text-xs px-2 py-0.5 rounded bg-muted/60 text-muted-foreground font-medium border border-border/50">
@@ -6103,7 +5997,7 @@ function PremiumAdminTab() {
                 <div key={u.id} className="grid grid-cols-3 px-4 py-2.5 text-sm items-center hover:bg-muted/20 transition-colors">
                   <span className="font-medium truncate">{u.username}</span>
                   <span className={u.premiumTier === "pro" ? "text-blue-400 font-semibold" : "text-yellow-400 font-semibold"}>
-                    {u.premiumTier === "pro" ? "💎 VIP / Pro" : "⭐ Premium"}
+                    {u.premiumTier === "pro" ? "💎 VIP" : "⭐ Premium"}
                   </span>
                   <span className={expired ? "text-destructive" : "text-muted-foreground"}>
                     {u.premiumExpiresAt ? new Date(u.premiumExpiresAt).toLocaleDateString() : "—"}
@@ -6122,7 +6016,7 @@ function PremiumAdminTab() {
           <Coins className="h-5 w-5 text-yellow-400" /> Grant / Revoke Premium
         </h3>
         <p className="text-sm text-muted-foreground">
-          Search for a user by username and grant them Premium or Pro access manually (e.g. after they pay via messages).
+          Search for a user by username and grant them Premium or VIP access manually (e.g. after they pay via messages).
         </p>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -6218,7 +6112,7 @@ function PremiumAdminTab() {
                       <div className="flex items-center gap-3 shrink-0">
                         {hasActivePro ? (
                           <span className="text-[11px] px-2 py-0.5 rounded-full font-bold uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                            💎 Pro VIP
+                            💎 VIP
                           </span>
                         ) : hasActivePrem ? (
                           <span className="text-[11px] px-2 py-0.5 rounded-full font-bold uppercase bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
@@ -6276,7 +6170,7 @@ function PremiumAdminTab() {
                   <button
                     onClick={() => setGrantTier("pro")}
                     className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${grantTier === "pro" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-border text-muted-foreground hover:text-foreground"}`}
-                  >💎 Pro</button>
+                  >💎 VIP</button>
                 </div>
               </div>
               <div>
@@ -6327,7 +6221,7 @@ function PremiumAdminTab() {
                   onClick={() => grantMutation.mutate()}
                   disabled={grantMutation.isPending}
                 >
-                  {grantMutation.isPending ? "Granting..." : `Grant ${grantTier === "pro" ? "Pro" : "Premium"}`}
+                  {grantMutation.isPending ? "Granting..." : `Grant ${grantTier === "pro" ? "VIP" : "Premium"}`}
                 </Button>
                 {selectedUser.premiumTier && (
                   <Button
@@ -6345,13 +6239,13 @@ function PremiumAdminTab() {
         )}
       </div>
 
-      {/* Pro Contact URL */}
+      {/* VIP Contact URL */}
       <div className="bg-card border border-blue-500/20 rounded-xl p-6 space-y-4">
         <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-          <ExternalLink className="h-5 w-5 text-blue-400" /> Pro "Buy" Button Link
+          <ExternalLink className="h-5 w-5 text-blue-400" /> VIP "Buy" Button Link
         </h3>
         <p className="text-sm text-muted-foreground">
-          Where users are sent when they click <strong className="text-foreground">Buy Pro</strong> on the Premium page.
+          Where users are sent when they click <strong className="text-foreground">Buy VIP</strong> on the Premium page.
           Use a relative path like <code className="text-xs bg-muted px-1 rounded">/messages</code> or a full external URL.
         </p>
         <div className="flex gap-2 max-w-lg">
@@ -6377,7 +6271,7 @@ function PremiumAdminTab() {
       <div className="bg-card border border-yellow-500/20 rounded-xl p-6">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-yellow-400 font-bold text-xl">✨</span>
-          <h3 className="font-bold text-foreground text-lg">Premium &amp; Pro Pricing</h3>
+          <h3 className="font-bold text-foreground text-lg">Premium &amp; VIP Pricing</h3>
         </div>
         <p className="text-sm text-muted-foreground mb-5">Set subscription prices. Set discount % &gt; 0 to show a red strikethrough on the original price.</p>
         <div className="space-y-3">
@@ -6403,7 +6297,7 @@ function PremiumAdminTab() {
           </div>
           <div className="flex items-center gap-4 bg-muted/30 rounded-lg px-4 py-3 border border-border">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold">Pro — USD Price</p>
+              <p className="text-sm font-semibold">VIP — USD Price</p>
               <p className="text-xs text-muted-foreground mt-0.5">Cost in cents (e.g. 1999 = $19.99/mo)</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
