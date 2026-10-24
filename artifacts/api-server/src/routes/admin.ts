@@ -22,8 +22,31 @@ const router = express.Router();
 router.get("/users", requireModOrAdmin, async (req, res) => {
   const page = parseInt(String(req.query.page ?? "1"), 10);
   const search = String(req.query.search ?? "").trim();
-  const limit = search ? 20 : 50;
-  const offset = search ? 0 : (page - 1) * limit;
+  const requestedLimit = parseInt(String(req.query.limit ?? ""), 10);
+  const limit = !isNaN(requestedLimit) && requestedLimit > 0
+    ? Math.min(requestedLimit, 500)
+    : (search ? 100 : 100);
+  const offset = (page - 1) * limit;
+
+  let whereClause = undefined;
+  if (search) {
+    const sLower = "%" + search.toLowerCase() + "%";
+    const numericId = parseInt(search, 10);
+    if (!isNaN(numericId) && String(numericId) === search) {
+      whereClause = or(
+        eq(usersTable.id, numericId),
+        sql`LOWER(${usersTable.username}) LIKE ${sLower}`,
+        sql`LOWER(COALESCE(${usersTable.displayName}, '')) LIKE ${sLower}`,
+        sql`LOWER(COALESCE(${usersTable.email}, '')) LIKE ${sLower}`
+      );
+    } else {
+      whereClause = or(
+        sql`LOWER(${usersTable.username}) LIKE ${sLower}`,
+        sql`LOWER(COALESCE(${usersTable.displayName}, '')) LIKE ${sLower}`,
+        sql`LOWER(COALESCE(${usersTable.email}, '')) LIKE ${sLower}`
+      );
+    }
+  }
 
   const users = await db
     .select({
@@ -49,7 +72,7 @@ router.get("/users", requireModOrAdmin, async (req, res) => {
       premiumExpiresAt: usersTable.premiumExpiresAt,
     })
     .from(usersTable)
-    .where(search ? sql`LOWER(${usersTable.username}) LIKE ${"%" + search.toLowerCase() + "%"}` : undefined)
+    .where(whereClause)
     .orderBy(desc(usersTable.createdAt))
     .limit(limit)
     .offset(offset);

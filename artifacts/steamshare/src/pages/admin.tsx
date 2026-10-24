@@ -5112,15 +5112,16 @@ function PremiumAdminTab() {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
-  const { data: searchResults = [] } = useQuery({
+  const { data: searchResults = [], isLoading: isLoadingUsers } = useQuery({
     queryKey: ["admin-users-search", debouncedSearch],
     queryFn: async () => {
-      if (!debouncedSearch.trim()) return [];
-      const res = await fetch(`/api/admin/users?search=${encodeURIComponent(debouncedSearch)}`, { credentials: "include" });
+      const q = debouncedSearch.trim()
+        ? `?search=${encodeURIComponent(debouncedSearch.trim())}&limit=200`
+        : "?limit=200";
+      const res = await fetch(`/api/admin/users${q}`, { credentials: "include" });
       if (!res.ok) return [];
       return res.json() as Promise<any[]>;
     },
-    enabled: debouncedSearch.trim().length > 0,
   });
   const { data: premiumUsersData, isLoading: premiumUsersLoading } = useQuery({
     queryKey: ["admin-premium-users"],
@@ -5265,7 +5266,7 @@ function PremiumAdminTab() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const filtered = searchResults.slice(0, 8);
+  const filtered = searchResults;
 
   const grantMutation = useMutation({
     mutationFn: async () => {
@@ -6124,32 +6125,124 @@ function PremiumAdminTab() {
           Search for a user by username and grant them Premium or Pro access manually (e.g. after they pay via messages).
         </p>
 
-        <Input
-          placeholder="Search users by username..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setSelectedUser(null); }}
-          className="max-w-sm"
-        />
-
-        {filtered.length > 0 && !selectedUser && (
-          <div className="bg-muted/30 border border-border rounded-lg divide-y divide-border">
-            {filtered.map((u: any) => (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Input
+              placeholder="Search by username, display name, email, or user ID..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setSelectedUser(null); }}
+              className="pr-8 text-xs sm:text-sm h-10"
+            />
+            {search && (
               <button
-                key={u.id}
-                onClick={() => { setSelectedUser(u); setSearch(u.username); }}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
+                type="button"
+                onClick={() => { setSearch(""); setSelectedUser(null); }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded"
+                title="Clear search"
               >
-                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                  {(u.username?.substring(0, 2) ?? "").toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{u.username}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {u.premiumTier ? <span className="text-yellow-400">★ {u.premiumTier}</span> : "No premium"}
-                  </p>
-                </div>
+                <X className="h-4 w-4" />
               </button>
-            ))}
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {isLoadingUsers ? (
+              <span className="flex items-center gap-1.5 text-primary font-medium">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                Loading users...
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-md bg-muted/50 border border-border/60">
+                Found <strong>{filtered.length}</strong> {filtered.length === 1 ? "user" : "users"}
+                {debouncedSearch.trim() ? ` matching "${debouncedSearch.trim()}"` : " in database"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {!selectedUser && (
+          <div>
+            {isLoadingUsers && filtered.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground bg-muted/20 border border-border rounded-xl">
+                <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-primary" />
+                Searching all users...
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-8 text-center bg-muted/20 border border-border rounded-xl space-y-1">
+                <p className="text-sm font-semibold text-foreground">No users found</p>
+                <p className="text-xs text-muted-foreground">
+                  No accounts matched "{search}". You can search by username, display name, email, or user ID.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-background border border-border/80 rounded-xl divide-y divide-border/60 max-h-80 overflow-y-auto shadow-xs">
+                {filtered.map((u: any) => {
+                  const hasActivePro = u.premiumTier === "pro" && u.premiumExpiresAt && new Date(u.premiumExpiresAt) > new Date();
+                  const hasActivePrem = u.premiumTier === "premium" && u.premiumExpiresAt && new Date(u.premiumExpiresAt) > new Date();
+                  const isExpired = u.premiumTier && u.premiumExpiresAt && new Date(u.premiumExpiresAt) <= new Date();
+
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => { setSelectedUser(u); setSearch(u.username); }}
+                      className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left group"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                          {(u.username?.substring(0, 2) ?? "").toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-foreground truncate group-hover:text-primary transition-colors">
+                              @{u.username}
+                            </span>
+                            {u.displayName && u.displayName !== u.username && (
+                              <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                                ({u.displayName})
+                              </span>
+                            )}
+                            <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                              #{u.id}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                            {u.email && (
+                              <span className="truncate max-w-[180px] sm:max-w-xs">{u.email}</span>
+                            )}
+                            {u.email && <span>•</span>}
+                            <span>Points: {u.points ?? 0}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        {hasActivePro ? (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-bold uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            💎 Pro VIP
+                          </span>
+                        ) : hasActivePrem ? (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-bold uppercase bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                            ⭐ Premium
+                          </span>
+                        ) : isExpired ? (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-red-500/15 text-red-400 border border-red-500/20">
+                            Expired
+                          </span>
+                        ) : (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-muted text-muted-foreground">
+                            Free
+                          </span>
+                        )}
+
+                        <span className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary border border-primary/20 font-semibold group-hover:bg-primary group-hover:text-primary-foreground transition-all">
+                          Select
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
