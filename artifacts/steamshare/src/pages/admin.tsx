@@ -3830,8 +3830,8 @@ function SmtpSettingsSection() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin-email-stats"] });
       toast({
-        title: "Test email delivered!",
-        description: `SMTP accepted message for ${testEmail.trim()} (${data?.details?.durationMs ? `${data.details.durationMs}ms` : 'OK'}).`,
+        title: "Test email queued!",
+        description: `Relay accepted message for ${testEmail.trim()} (${data?.details?.durationMs ? `${data.details.durationMs}ms` : 'OK'}).`,
       });
     },
     onError: (e: any) => {
@@ -4083,14 +4083,14 @@ function SmtpSettingsSection() {
                       <div className="space-y-1.5 flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <p className="font-semibold text-sm text-emerald-200">
-                            Email Successfully Delivered & Accepted by SMTP Server!
+                            Email Queued by Mail Relay
                           </p>
                           <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 shrink-0 font-medium">
                             250 OK
                           </span>
                         </div>
                         <p className="text-xs text-emerald-300/80">
-                          The recipient mail server accepted your test email for delivery to <strong className="text-emerald-100">{testEmail || (testResult.details?.accepted || []).join(', ')}</strong>.
+                          Your mail relay accepted the test email into its outbound queue for <strong className="text-emerald-100">{testEmail || (testResult.details?.accepted || []).join(', ')}</strong>.
                         </p>
                         {testResult.details && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-emerald-500/20 text-[11px] font-mono text-zinc-300">
@@ -4102,12 +4102,32 @@ function SmtpSettingsSection() {
                               <span className="text-zinc-500">Duration:</span>{" "}
                               <span className="text-emerald-300">{testResult.details.durationMs ? `${testResult.details.durationMs}ms` : "N/A"}</span>
                             </div>
+                            {testResult.details.host && (
+                              <div>
+                                <span className="text-zinc-500">Relay:</span>{" "}
+                                <span className="text-zinc-200">{testResult.details.host} ({testResult.details.provider || "SMTP"})</span>
+                              </div>
+                            )}
+                            {testResult.details.from && (
+                              <div>
+                                <span className="text-zinc-500">From:</span>{" "}
+                                <span className="text-zinc-200 break-all">{testResult.details.from}</span>
+                              </div>
+                            )}
                             <div className="sm:col-span-2">
                               <span className="text-zinc-500">SMTP Response:</span>{" "}
                               <span className="text-zinc-200">{testResult.details.response || "250 2.0.0 OK"}</span>
                             </div>
                           </div>
                         )}
+                        <div className="mt-2 pt-2 border-t border-emerald-500/20 text-[11px] text-emerald-200/80 space-y-1">
+                          <p className="font-semibold text-emerald-200">If the email doesn't show up in your inbox or Brevo Transactional Logs:</p>
+                          <ul className="list-disc list-inside space-y-0.5 pl-1">
+                            <li>Check the <b>Relay</b> above — if it used <code>smtp-relay.brevo.com</code> with 0 emails in your Brevo account, switch to <b>Brevo API (Recommended)</b> using an <code>xkeysib-...</code> API Key from the exact Brevo account you are logged into (Brevo API rejects unactivated accounts immediately instead of silently queueing).</li>
+                            <li>Check your <b>Spam / Junk / All Mail</b> folder.</li>
+                            <li>Make sure your domain DNS SPF record includes <code>include:spf.brevo.com</code>.</li>
+                          </ul>
+                        </div>
                       </div>
                     </div>
                   </div>

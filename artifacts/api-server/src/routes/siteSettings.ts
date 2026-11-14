@@ -330,9 +330,10 @@ router.post("/smtp/test", requireAdmin, async (req, res) => {
 // PUT /site-settings/smtp — admin only, update SMTP config
 router.put("/smtp", requireAdmin, async (req, res) => {
   const { smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, register_2fa_enabled } = req.body as Record<string, any>;
+  const cleanHost = String(smtp_host ?? "").trim();
 
   const pairs: [string, string][] = [
-    ["smtp_host", String(smtp_host ?? "").trim()],
+    ["smtp_host", cleanHost],
     ["smtp_port", String(smtp_port ?? "587").trim()],
     ["smtp_user", String(smtp_user ?? "").trim()],
     ["smtp_from", String(smtp_from ?? "").trim()],
@@ -340,13 +341,25 @@ router.put("/smtp", requireAdmin, async (req, res) => {
   ];
 
   // Only update password if a real value (not the masked placeholder) is provided
+  let nextPass: string | null = null;
   if (smtp_pass && typeof smtp_pass === "string" && smtp_pass.trim() && smtp_pass !== "••••••••") {
     let cleanPass = smtp_pass.trim();
     // If it's a Gmail App Password copied with spaces (e.g. "abcd efgh ijkl mnop"), strip spaces
-    if (cleanPass.includes(" ") && (String(smtp_host || "").includes("gmail") || String(smtp_user || "").includes("gmail") || /^[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}$/.test(cleanPass))) {
+    if (cleanPass.includes(" ") && (cleanHost.includes("gmail") || String(smtp_user || "").includes("gmail") || /^[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}\s+[a-zA-Z]{4}$/.test(cleanPass))) {
       cleanPass = cleanPass.replace(/\s+/g, "");
     }
+    nextPass = cleanPass;
     pairs.push(["smtp_pass", cleanPass]);
+  } else {
+    const current = await getAllSettings();
+    nextPass = current.smtp_pass || "";
+  }
+
+  if (cleanHost.toLowerCase() === "api.brevo.com" && nextPass.startsWith("xsmtpsib-")) {
+    res.status(400).json({
+      error: "You selected Brevo API (api.brevo.com), which requires an API key starting with 'xkeysib-' (from Brevo → SMTP & API → API Keys), not an 'xsmtpsib-' SMTP key.",
+    });
+    return;
   }
 
   await saveSettings(pairs);

@@ -41,6 +41,9 @@ export interface SendEmailResult {
   durationMs: number;
   timestamp: string;
   logs: string[];
+  provider?: string;
+  host?: string;
+  from?: string;
 }
 
 let lastSmtpResult: SendEmailResult | null = null;
@@ -76,6 +79,25 @@ export function parseSenderParts(rawFrom?: string, fallbackUser?: string): { nam
 export function formatSenderAddress(rawFrom?: string, fallbackUser?: string): string {
   const { name, email } = parseSenderParts(rawFrom, fallbackUser);
   return `"${name}" <${email}>`;
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<\/(p|div|h1|h2|h3|h4|li|tr|td|br)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#039;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 export async function sendEmail(
@@ -124,6 +146,22 @@ export async function sendEmail(
       throw err;
     }
 
+    if (isBrevoApiHost && rawPass.startsWith("xsmtpsib-")) {
+      const err = new Error("Brevo Config Mismatch: You selected 'api.brevo.com' (Brevo API) but saved an SMTP key (xsmtpsib-...). Either paste a Brevo API Key (xkeysib-...) from Brevo → SMTP & API → API Keys, or switch to 'Brevo SMTP' (smtp-relay.brevo.com).");
+      log(`[ERROR] Host is api.brevo.com but key starts with xsmtpsib- (SMTP key).`);
+      (err as any).logs = logs;
+      await recordEmailEvent({
+        recipient: to,
+        subject,
+        purpose: effectivePurpose,
+        status: "failed",
+        durationMs: Date.now() - startTime,
+        error: err.message,
+        provider: "Brevo API",
+      });
+      throw err;
+    }
+
     const sender = parseSenderParts(rawFrom, rawUser);
     if (!sender.email || !sender.email.includes("@") || sender.email === "noreply@steamfamily.com" || sender.email.toLowerCase().endsWith("@smtp-brevo.com")) {
       const err = new Error("Brevo Sender Error: Please set 'From Address' to a verified sender email from your Brevo account (Senders & IP → Senders).");
@@ -143,6 +181,7 @@ export async function sendEmail(
 
     log(`Provider: Brevo Transactional Email HTTP API (https://api.brevo.com/v3/smtp/email)`);
     log(`Sender: "${sender.name}" <${sender.email}>`);
+    const textContent = htmlToPlainText(html);
 
     try {
       const response = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -154,9 +193,11 @@ export async function sendEmail(
         },
         body: JSON.stringify({
           sender: { name: sender.name, email: sender.email },
+          replyTo: { name: sender.name, email: sender.email },
           to: [{ email: to }],
           subject,
           htmlContent: html,
+          textContent,
         }),
       });
 
@@ -202,6 +243,9 @@ export async function sendEmail(
         durationMs,
         timestamp: new Date().toISOString(),
         logs,
+        provider: "Brevo API",
+        host: "api.brevo.com",
+        from: `"${sender.name}" <${sender.email}>`,
       };
 
       await recordEmailEvent({
@@ -286,7 +330,9 @@ export async function sendEmail(
     log(`Sanitized Google App Password whitespace (16 chars)`);
   }
 
-  const senderFrom = formatSenderAddress(rawFrom, rawUser);
+  const senderParts = parseSenderParts(rawFrom, rawUser);
+  const senderFrom = `"${senderParts.name}" <${senderParts.email}>`;
+  const textBody = htmlToPlainText(html);
 
   log(`Target SMTP server: ${rawHost}:${port} (${port === 465 ? 'SSL direct' : 'STARTTLS'})`);
   log(`Auth user: ${rawUser}`);
@@ -310,8 +356,10 @@ export async function sendEmail(
 
   const mailOptions = {
     from: senderFrom,
+    replyTo: senderFrom,
     to,
     subject,
+    text: textBody,
     html,
   };
 
@@ -340,6 +388,9 @@ export async function sendEmail(
         durationMs,
         timestamp: new Date().toISOString(),
         logs,
+        provider: isBrevo ? "Brevo SMTP" : isGmail ? "Gmail" : "SMTP",
+        host: `${rawHost}:${port}`,
+        from: senderFrom,
       };
 
       await recordEmailEvent({
