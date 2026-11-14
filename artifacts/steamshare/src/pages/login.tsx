@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Eye, EyeOff, Zap, X, ShieldCheck, Mail } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, Zap, X, ShieldCheck, Mail, RefreshCw } from "lucide-react";
 import { useState, useRef } from "react";
 
 const formSchema = z.object({
@@ -28,11 +28,16 @@ export default function Login() {
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState("");
   const [codeLoading, setCodeLoading] = useState(false);
+  const [resend2faLoading, setResend2faLoading] = useState(false);
+  const [resend2faDone, setResend2faDone] = useState(false);
   const codeInputRef = useRef<HTMLInputElement>(null);
 
   // Email verification state
   const [requiresVerification, setRequiresVerification] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [verifyLoading, setVerifyLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendDone, setResendDone] = useState(false);
 
@@ -100,6 +105,73 @@ export default function Login() {
     }
   }
 
+  async function onResend2fa() {
+    if (resend2faLoading) return;
+    setCodeError("");
+    setResend2faDone(false);
+    setResend2faLoading(true);
+    try {
+      const res = await fetch("/api/auth/resend-2fa", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to resend code.");
+      setResend2faDone(true);
+      setCode("");
+    } catch (e: any) {
+      setCodeError(e.message || "Failed to resend code.");
+    } finally {
+      setResend2faLoading(false);
+    }
+  }
+
+  async function onVerifyPendingEmail() {
+    setVerifyError("");
+    setVerifyLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify-registration", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: verifyCode.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Invalid verification code.");
+
+      queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+      setSuccess(true);
+      setTimeout(() => setLocation("/admin"), 600);
+    } catch (e: any) {
+      setVerifyError(e.message || "Invalid verification code.");
+    } finally {
+      setVerifyLoading(false);
+    }
+  }
+
+  async function onResendPendingEmail() {
+    if (!verificationEmail || resendLoading) return;
+    setVerifyError("");
+    setResendDone(false);
+    setResendLoading(true);
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: verificationEmail }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to resend verification email.");
+      setResendDone(true);
+      setVerifyCode("");
+    } catch (e: any) {
+      setVerifyError(e.message || "Failed to resend verification email.");
+    } finally {
+      setResendLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-12 relative">
       <button
@@ -119,6 +191,73 @@ export default function Login() {
             <div>
               <p className="font-bold text-lg text-foreground">You're in!</p>
               <p className="text-sm text-muted-foreground mt-1">Redirecting to the admin console…</p>
+            </div>
+          </div>
+        ) : requiresVerification ? (
+          /* ── Unverified email verification step ── */
+          <div>
+            <div className="mb-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-3">
+                <Mail className="h-6 w-6 text-primary" />
+              </div>
+              <h2 className="text-2xl font-black text-foreground">Verify your email</h2>
+              <p className="text-muted-foreground mt-1.5 text-xs">
+                Your account{verificationEmail ? ` (${verificationEmail})` : ""} is not verified yet. Enter your 6-digit verification code or resend a new one.
+              </p>
+            </div>
+
+            {verifyError && (
+              <div className="flex items-start gap-3 bg-red-500/8 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-400 mb-4">
+                <Zap className="h-4 w-4 mt-0.5 shrink-0" />
+                {verifyError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-foreground block mb-1.5">Verification code</label>
+                <Input
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onKeyDown={(e) => { if (e.key === "Enter" && verifyCode.length === 6) onVerifyPendingEmail(); }}
+                  placeholder="000000"
+                  inputMode="numeric"
+                  maxLength={6}
+                  className="h-14 text-center text-3xl font-mono tracking-widest bg-secondary/40 border-border focus:border-primary/60 rounded-xl"
+                  autoFocus
+                />
+              </div>
+              <Button
+                className="w-full h-12 font-bold rounded-xl text-base"
+                onClick={onVerifyPendingEmail}
+                disabled={verifyCode.length !== 6 || verifyLoading}
+              >
+                {verifyLoading ? "Verifying…" : "Verify Email & Sign in"}
+              </Button>
+              {resendDone ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-primary py-1">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Verification code sent!
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={onResendPendingEmail}
+                  disabled={resendLoading || !verificationEmail}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${resendLoading ? "animate-spin" : ""}`} />
+                  {resendLoading ? "Sending…" : "Resend verification code"}
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setRequiresVerification(false); setVerifyCode(""); setVerifyError(""); setResendDone(false); }}
+                className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ← Go back
+              </button>
             </div>
           </div>
         ) : requires2fa ? (
@@ -162,9 +301,26 @@ export default function Login() {
               >
                 {codeLoading ? "Verifying…" : "Verify & Sign in"}
               </Button>
+              {resend2faDone ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-primary py-1">
+                  <CheckCircle2 className="h-4 w-4" />
+                  New login code sent!
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={onResend2fa}
+                  disabled={resend2faLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${resend2faLoading ? "animate-spin" : ""}`} />
+                  {resend2faLoading ? "Sending…" : "Resend login code"}
+                </Button>
+              )}
               <button
                 type="button"
-                onClick={() => { setRequires2fa(false); setCode(""); setCodeError(""); }}
+                onClick={() => { setRequires2fa(false); setCode(""); setCodeError(""); setResend2faDone(false); }}
                 className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 ← Go back

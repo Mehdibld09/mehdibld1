@@ -1,5 +1,6 @@
 import { db, siteSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { getAllSettings } from "./settingsStore";
 
 export const XP_DEFAULTS = {
   xp_upload_account: 50,
@@ -18,24 +19,43 @@ export const XP_DEFAULTS = {
 export type XpSettingKey = keyof typeof XP_DEFAULTS;
 
 export async function getSetting(key: XpSettingKey): Promise<number> {
-  const [row] = await db
-    .select({ value: siteSettingsTable.value })
-    .from(siteSettingsTable)
-    .where(eq(siteSettingsTable.key, key))
-    .limit(1);
-  if (!row) return XP_DEFAULTS[key];
-  const parsed = parseInt(row.value, 10);
-  return isNaN(parsed) ? XP_DEFAULTS[key] : parsed;
+  try {
+    const [row] = await db
+      .select({ value: siteSettingsTable.value })
+      .from(siteSettingsTable)
+      .where(eq(siteSettingsTable.key, key))
+      .limit(1);
+    if (row) {
+      const parsed = parseInt(row.value, 10);
+      return isNaN(parsed) ? XP_DEFAULTS[key] : parsed;
+    }
+  } catch {
+    // Fall back to file store
+  }
+  const all = await getAllSettings();
+  if (all[key] !== undefined) {
+    const parsed = parseInt(all[key], 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return XP_DEFAULTS[key];
 }
 
 export async function getBooleanSetting(key: string, defaultValue: boolean): Promise<boolean> {
-  const [row] = await db
-    .select({ value: siteSettingsTable.value })
-    .from(siteSettingsTable)
-    .where(eq(siteSettingsTable.key, key))
-    .limit(1);
-  if (!row) return defaultValue;
-  return row.value === "1";
+  try {
+    const [row] = await db
+      .select({ value: siteSettingsTable.value })
+      .from(siteSettingsTable)
+      .where(eq(siteSettingsTable.key, key))
+      .limit(1);
+    if (row) return row.value === "1";
+  } catch {
+    // Fall back to file store
+  }
+  const all = await getAllSettings();
+  if (all[key] !== undefined) {
+    return all[key] === "1";
+  }
+  return defaultValue;
 }
 
 export async function getAllXpSettings(): Promise<typeof XP_DEFAULTS> {

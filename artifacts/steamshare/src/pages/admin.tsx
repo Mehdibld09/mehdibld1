@@ -3867,18 +3867,34 @@ function SmtpSettingsSection() {
           <button
             type="button"
             onClick={() => {
-              setHost("smtp-relay.brevo.com");
-              setPort("587");
-              toast({ title: "Brevo preset applied", description: "Host set to smtp-relay.brevo.com (Port 587). Enter your Brevo account email and SMTP Key." });
+              setHost("api.brevo.com");
+              setPort("443");
+              toast({ title: "Brevo API preset applied", description: "Paste your Brevo API Key (xkeysib-...) and your verified From Address." });
             }}
             className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
-              host.includes("brevo") || host.includes("sendinblue")
+              host === "api.brevo.com"
                 ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/40 font-semibold"
                 : "bg-background hover:bg-muted text-foreground border-border"
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            Brevo (Recommended)
+            Brevo API (Recommended)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setHost("smtp-relay.brevo.com");
+              setPort("587");
+              toast({ title: "Brevo SMTP preset applied", description: "Host set to smtp-relay.brevo.com (Port 587). Enter your Brevo SMTP Login (e.g. xxxxx@smtp-brevo.com) and SMTP Key." });
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
+              (host.includes("brevo") || host.includes("sendinblue")) && host !== "api.brevo.com"
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/40 font-semibold"
+                : "bg-background hover:bg-muted text-foreground border-border"
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+            Brevo SMTP
           </button>
           <button
             type="button"
@@ -3912,13 +3928,13 @@ function SmtpSettingsSection() {
           </button>
         </div>
 
-        {host.includes("brevo") && (
+        {(host.includes("brevo") || host.includes("sendinblue")) && (
           <div className="mt-3 text-xs bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 rounded-md p-3 space-y-1.5">
-            <p className="font-semibold text-emerald-300">Brevo (Sendinblue) Instructions:</p>
+            <p className="font-semibold text-emerald-300">Brevo Setup Instructions:</p>
             <ul className="list-disc list-inside space-y-1 text-emerald-200/90 pl-1 text-[11px] leading-relaxed">
-              <li><b>Username / Email:</b> Your Brevo login email address.</li>
-              <li><b>Password:</b> Your Brevo <b>SMTP Key</b> (go to <b>Brevo Dashboard → SMTP & API → SMTP</b> and copy or generate an SMTP key starting with <code>xsmtpsib-...</code>). <i>Do not use your personal Brevo account password.</i></li>
-              <li><b>From Address:</b> Must be a verified sender in Brevo (under <b>Senders & IP → Senders</b>).</li>
+              <li><b>Option 1 — Brevo API Key (Easiest):</b> Go to <b>Brevo → SMTP & API → API Keys</b>, generate an API key (starts with <code>xkeysib-</code>), paste it in the Key field below, and enter your verified email in <b>From Address</b>. Leave SMTP Login blank.</li>
+              <li><b>Option 2 — Brevo SMTP:</b> Go to <b>Brevo → SMTP & API → SMTP</b>. Copy the exact <b>Login</b> shown there (usually <code>xxxxxx@smtp-brevo.com</code> — <i>not</i> your personal Brevo email unless listed) and your <b>SMTP Key</b> (starts with <code>xsmtpsib-</code>).</li>
+              <li><b>From Address (Required):</b> Must be a verified sender in Brevo under <b>Senders & IP → Senders</b>.</li>
             </ul>
           </div>
         )}
@@ -3949,7 +3965,7 @@ function SmtpSettingsSection() {
           <div className="col-span-2">
             <label className="text-xs font-medium text-foreground mb-1.5 block">SMTP Host</label>
             <Input
-              placeholder={host.includes("brevo") ? "smtp-relay.brevo.com" : "smtp.gmail.com"}
+              placeholder={host.includes("brevo") ? "api.brevo.com or smtp-relay.brevo.com" : "smtp.gmail.com"}
               value={host}
               onChange={(e) => setHost(e.target.value)}
               autoComplete="off"
@@ -3969,10 +3985,10 @@ function SmtpSettingsSection() {
         </div>
         <div>
           <label className="text-xs font-medium text-foreground mb-1.5 block">
-            {host.includes("brevo") ? "Brevo Login Email" : "Username / Email"}
+            {host.includes("brevo") ? "Brevo SMTP Login (optional if using xkeysib- API Key)" : "Username / Email"}
           </label>
           <Input
-            placeholder={host.includes("brevo") ? "your-brevo-account@example.com" : "yourapp@gmail.com"}
+            placeholder={host.includes("brevo") ? "xxxxxx@smtp-brevo.com (leave blank for API key)" : "yourapp@gmail.com"}
             value={user}
             onChange={(e) => setUser(e.target.value)}
             autoComplete="off"
@@ -3981,7 +3997,7 @@ function SmtpSettingsSection() {
         </div>
         <div>
           <label className="text-xs font-medium text-foreground mb-1.5 block">
-            {host.includes("brevo") ? "Brevo SMTP Key" : "Password / App Password"}
+            {host.includes("brevo") ? "Brevo API Key (xkeysib-) or SMTP Key (xsmtpsib-)" : "Password / App Password"}
           </label>
           <Input
             type="password"
@@ -3989,7 +4005,7 @@ function SmtpSettingsSection() {
               smtpData?.configured
                 ? "•••••••• (Password configured — leave blank to keep current)"
                 : host.includes("brevo")
-                ? "xsmtpsib-xxxxxxxxxxxxxxxxxxxx..."
+                ? "xkeysib-... or xsmtpsib-..."
                 : "App password or SMTP password"
             }
             value={pass}

@@ -245,18 +245,22 @@ router.delete("/ads/:id", requireAdmin, async (req, res) => {
 // GET /site-settings/smtp — admin only, returns current SMTP config (password masked)
 router.get("/smtp", requireAdmin, async (_req, res) => {
   const map = await getAllSettings();
-  const host = map.smtp_host ?? process.env.SMTP_HOST ?? "";
-  const port = map.smtp_port ?? process.env.SMTP_PORT ?? "587";
-  const user = map.smtp_user ?? process.env.SMTP_USER ?? "";
-  const pass = map.smtp_pass ?? process.env.SMTP_PASS ?? "";
-  const from = map.smtp_from ?? process.env.SMTP_FROM ?? "";
+  const host = map.smtp_host || process.env.SMTP_HOST || "";
+  const port = map.smtp_port || process.env.SMTP_PORT || "587";
+  const user = map.smtp_user || process.env.SMTP_USER || process.env.BREVO_SMTP_USER || process.env.BREVO_LOGIN_EMAIL || "";
+  const pass = map.smtp_pass || process.env.SMTP_PASS || process.env.BREVO_SMTP_KEY || process.env.BREVO_API_KEY || "";
+  const from = map.smtp_from || process.env.SMTP_FROM || process.env.BREVO_FROM_EMAIL || "";
+  const isBrevoApi = pass.startsWith("xkeysib-") || host.toLowerCase() === "api.brevo.com";
+  const configured = isBrevoApi
+    ? !!(pass && (from || (user && !user.toLowerCase().endsWith("@smtp-brevo.com"))))
+    : !!(host && user && pass);
   res.json({
     smtp_host: host,
     smtp_port: port,
     smtp_user: user,
     smtp_pass: pass ? "••••••••" : "",
     smtp_from: from,
-    configured: !!(host && user && pass),
+    configured,
     register_2fa_enabled: map.register_2fa_enabled !== "0",
   });
 });

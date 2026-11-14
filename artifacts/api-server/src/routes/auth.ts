@@ -15,6 +15,14 @@ import {
   registrationCodeEmailHtml,
   passwordChangeEmailHtml,
 } from "../lib/email";
+import { logger } from "../lib/logger";
+
+function getBaseUrl(req: any): string {
+  const host = req.headers?.host || "localhost:3000";
+  const protoHeader = req.headers?.["x-forwarded-proto"];
+  const proto = (typeof protoHeader === "string" ? protoHeader.split(",")[0].trim() : "") || req.protocol || "https";
+  return `${proto}://${host}`;
+}
 
 const router = express.Router();
 
@@ -149,9 +157,7 @@ router.post("/register", async (req, res) => {
     })
     .returning();
 
-  const host = req.headers.host || "localhost";
-  const protocol = req.headers["x-forwarded-proto"] || "https";
-  const verifyUrl = `${protocol}://${host}/verify-email?token=${verificationToken}`;
+  const verifyUrl = `${getBaseUrl(req)}/verify-email?token=${verificationToken}`;
 
   try {
     await sendEmail(
@@ -181,12 +187,14 @@ router.post("/register", async (req, res) => {
     });
   } catch (emailErr: any) {
     const msg: string = emailErr?.message ?? "";
-    // Mandatory registration 2FA fails closed when email delivery is unavailable.
+    logger.error({ err: emailErr, email }, "Registration verification email failed");
+    // Roll back the unverified user so they are not locked out with 409 on retry
+    await db.delete(usersTable).where(eq(usersTable.id, user.id)).catch(() => {});
     if (msg.includes("SMTP is not configured")) {
       res.status(503).json({ error: "Email delivery is not configured. Registration cannot be completed right now." });
       return;
     }
-    res.status(503).json({ error: "We couldn't send the verification code. Registration cannot be completed right now." });
+    res.status(503).json({ error: msg ? `We couldn't send the verification code: ${msg}` : "We couldn't send the verification code. Registration cannot be completed right now." });
   }
 });
 
@@ -302,6 +310,8 @@ router.post("/resend-verification", async (req, res) => {
     return;
   }
 
+  const isKnownPendingSession = (req.session as any).pendingRegistrationUserId === user.id;
+
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const code = createVerificationCode();
@@ -316,9 +326,7 @@ router.post("/resend-verification", async (req, res) => {
     })
     .where(eq(usersTable.id, user.id));
 
-  const host = req.headers.host || "localhost";
-  const protocol = req.headers["x-forwarded-proto"] || "https";
-  const verifyUrl = `${protocol}://${host}/verify-email?token=${token}`;
+  const verifyUrl = `${getBaseUrl(req)}/verify-email?token=${token}`;
 
   try {
     await sendEmail(
@@ -327,8 +335,18 @@ router.post("/resend-verification", async (req, res) => {
       registrationCodeEmailHtml(code, user.username, verifyUrl),
       "verify_email",
     );
-  } catch {
-    // silent — don't leak SMTP errors
+  } catch (emailErr: any) {
+    logger.error({ err: emailErr, email }, "Resend verification email failed");
+    if (isKnownPendingSession) {
+      res.status(500).json({ error: emailErr?.message || "Failed to send verification email." });
+      return;
+    }
+    // silent for anonymous callers — don't leak email existence
+  }
+
+  if (isKnownPendingSession) {
+    res.json({ sent: true });
+    return;
   }
 
   res.json({ sent: true });
@@ -363,19 +381,16 @@ router.post("/login", async (req, res) => {
     return;
   }
 
-  // Block login for unverified accounts
+  // Block login for unverified accounts and bind pendingRegistrationUserId to session
+  // (password has been verified) so the user can enter/resend their verification code.
   if (user.emailVerified === false) {
-    res.status(403).json({ error: "Please verify your email before logging in.", requiresEmailVerification: true, email: user.email });
-    return;
-  }
-
-  // A newly registered user must complete the registration code challenge
-  // before the first session can be created, even if they clicked the link.
-  if (!user.emailVerified && user.twoFactorCode) {
-    res.status(403).json({
-      error: "Please complete registration with the verification code sent to your email.",
-      requiresRegistrationTwoFactor: true,
-      email: user.email,
+    (req.session as any).pendingRegistrationUserId = user.id;
+    req.session.save(() => {
+      res.status(403).json({
+        error: "Please verify your email before logging in.",
+        requiresEmailVerification: true,
+        email: user.email,
+      });
     });
     return;
   }
@@ -505,6 +520,36 @@ router.post("/verify-2fa", async (req, res) => {
       res.status(200).json(safeUser);
     });
   });
+});
+
+// POST /auth/resend-2fa — resend 2FA login code for pending 2FA session
+router.post("/resend-2fa", async (req, res) => {
+  const pendingUserId = (req.session as any).pending2faUserId;
+  if (!pendingUserId) {
+    res.status(400).json({ error: "No pending 2FA session. Please log in again." });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, pendingUserId)).limit(1);
+  if (!user) {
+    res.status(400).json({ error: "User not found." });
+    return;
+  }
+
+  const code = createVerificationCode();
+  const codeHash = await bcrypt.hash(code, 10);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await db.update(usersTable)
+    .set({ twoFactorCode: codeHash, twoFactorCodeExpiresAt: expiresAt })
+    .where(eq(usersTable.id, user.id));
+
+  try {
+    await sendEmail(user.email, "SteamFamily: Your login code", twoFactorEmailHtml(code, user.username), "2fa_login");
+    res.json({ sent: true });
+  } catch (emailErr: any) {
+    logger.error({ err: emailErr, userId: user.id }, "Resend 2FA email failed");
+    res.status(500).json({ error: emailErr?.message || "Failed to send login code." });
+  }
 });
 
 // GET /auth/2fa-status — returns whether 2FA is enabled for the logged-in user
